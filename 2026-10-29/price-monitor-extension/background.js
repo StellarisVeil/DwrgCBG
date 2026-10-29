@@ -1,5 +1,5 @@
 // background.js — MV3 service worker
-// 职责：接收 content.js 命中的商品，推送到企业微信机器人，并弹出本地通知。
+// 职责：接收 content.js 命中的账号，推送到企业微信机器人，并弹出本地通知。
 
 const ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC';
 
@@ -15,10 +15,15 @@ async function sendToWeCom(webhook, content) {
 async function handleHits(hits) {
   const { pm_config = {} } = await chrome.storage.local.get('pm_config');
   for (const h of hits) {
+    const skinLines = (h.matched || [])
+      .map(m => `- ${m.name}：¥${m.price}`)
+      .join('\n');
     const content =
-      `### 🔔 价格提醒\n` +
-      `**商品**: ${h.title || '(未命名)'}\n` +
-      `**价格**: ${h.price}\n` +
+      `### 🔔 皮肤套餐提醒\n` +
+      `**账号**: ${h.title || '(未命名账号)'}\n` +
+      `**命中皮肤**:\n${skinLines}\n` +
+      `**合计参考价**: ¥${h.sum}` +
+      (h.acctPrice != null ? `（账号售价 ¥${h.acctPrice}）` : '') + `\n` +
       `**页面**: [打开](${h.url})\n` +
       `> 检测时间: ${new Date().toLocaleString('zh-CN')}`;
     await sendToWeCom(pm_config.webhook, content);
@@ -28,8 +33,8 @@ async function handleHits(hits) {
       await chrome.notifications.create('pm-' + Date.now(), {
         type: 'basic',
         iconUrl: ICON,
-        title: '价格监控提醒',
-        message: `发现 ${hits.length} 个满足条件的商品，已推送企业微信`
+        title: '皮肤套餐提醒',
+        message: `发现 ${hits.length} 个账号满足条件，已推送企业微信`
       });
     } catch (e) { /* 通知失败不影响推送 */ }
   }
@@ -40,7 +45,7 @@ async function sendTest() {
   if (!pm_config.webhook) return;
   await sendToWeCom(
     pm_config.webhook,
-    `### ✅ 测试消息\n价格监控插件已正确连接企业微信机器人\n> ${new Date().toLocaleString('zh-CN')}`
+    `### ✅ 测试消息\n皮肤监控插件已正确连接企业微信机器人\n> ${new Date().toLocaleString('zh-CN')}`
   );
 }
 

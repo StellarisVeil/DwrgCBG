@@ -1,14 +1,22 @@
-// options.js — 配置页逻辑：读写配置、注册/注销 content script、测试、清空去重记录
+// options.js — 配置页逻辑：读写配置、注册/注销 content script、解析皮肤清单、CSV 导入、测试、清空去重记录
 const $ = (id) => document.getElementById(id);
 const SCRIPT_ID = 'pm-monitor';
 
-async function unregister() {
-  try { await chrome.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] }); } catch (e) {}
+// 预置假数据：让功能在没有真实 Excel 时也能跑通演示
+const DEFAULT_SKINS =
+`司药,30
+石榴碟小姐,50
+片刻闲暇,40
+长夜,25
+欧律狄刻,35`;
+
+function unregister() {
+  return chrome.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] }).catch(() => {});
 }
 
 async function register(pattern) {
   await unregister();
-  await chrome.scripting.registerContentScripts({
+  return chrome.scripting.registerContentScripts({
     id: SCRIPT_ID,
     matches: [pattern],
     js: ['content.js'],
@@ -22,25 +30,50 @@ function setStatus(msg, ok) {
   s.style.color = ok ? '#0a0' : '#c00';
 }
 
+// 把文本框解析成 [{name, price}]；忽略空行和无效行
+function parseSkins(text) {
+  const out = [];
+  let bad = 0;
+  text.split(/\r?\n/).forEach((line) => {
+    const t = line.trim();
+    if (!t) return;
+    const idx = t.indexOf(',');
+    if (idx < 0) { bad++; return; }
+    const name = t.slice(0, idx).trim();
+    const price = t.slice(idx + 1).trim();
+    if (!name) { bad++; return; }
+    out.push({ name, price });
+  });
+  return { skins: out, bad };
+}
+
 async function save() {
+  const { skins, bad } = parseSkins($('skins').value);
+  if (!skins.length) {
+    setStatus('皮肤清单为空或格式不对（应为 名称,价格 每行一个）', false);
+    return;
+  }
   const cfg = {
     enabled: $('enabled').checked,
     pattern: $('pattern').value.trim(),
-    intervalSec: Math.max(1, parseInt($('intervalSec').value, 10) || 30),
+    intervalSec: Math.max(1, parseInt($('intervalSec').value, 10) || 60),
     reload: $('reload').checked,
     itemSelector: $('itemSelector').value.trim(),
-    fieldSelector: $('fieldSelector').value.trim(),
+    skinNameSelector: $('skinNameSelector').value.trim(),
     titleSelector: $('titleSelector').value.trim(),
-    operator: $('operator').value,
+    accountPriceSelector: $('accountPriceSelector').value.trim(),
+    skins,
     threshold: parseFloat($('threshold').value),
     webhook: $('webhook').value.trim()
   };
   await chrome.storage.local.set({ pm_config: cfg });
 
-  if (cfg.enabled && cfg.pattern && cfg.itemSelector && cfg.fieldSelector) {
+  if (cfg.enabled && cfg.pattern && cfg.itemSelector && cfg.skinNameSelector) {
     try {
       await register(cfg.pattern);
-      setStatus('已保存并启用监控，匹配: ' + cfg.pattern, true);
+      let msg = `已保存并启用监控，匹配: ${cfg.pattern}；皮肤清单 ${skins.length} 条`;
+      if (bad) msg += `（${bad} 行无效已忽略）`;
+      setStatus(msg, true);
     } catch (e) {
       setStatus('保存成功，但注册脚本失败: ' + e.message, false);
     }
@@ -52,15 +85,28 @@ async function save() {
 
 async function load() {
   const { pm_config } = await chrome.storage.local.get('pm_config');
-  if (!pm_config) return;
+  if (!pm_config) {
+    // 首次进入：预置假数据 + 藏宝阁首页默认选择器
+    $('pattern').value = 'https://id5.cbg.163.com/*';
+    $('intervalSec').value = 60;
+    $('reload').checked = true;
+    $('itemSelector').value = '.product-item.product-item-cards';
+    $('skinNameSelector').value = '.card-item .name-wrap .name';
+    $('titleSelector').value = '.main-title';
+    $('accountPriceSelector').value = '.row-hd .price';
+    $('skins').value = DEFAULT_SKINS;
+    $('threshold').value = 100;
+    return;
+  }
   $('enabled').checked = !!pm_config.enabled;
   $('pattern').value = pm_config.pattern || '';
-  $('intervalSec').value = pm_config.intervalSec || 30;
+  $('intervalSec').value = pm_config.intervalSec || 60;
   $('reload').checked = pm_config.reload !== false;
   $('itemSelector').value = pm_config.itemSelector || '';
-  $('fieldSelector').value = pm_config.fieldSelector || '';
+  $('skinNameSelector').value = pm_config.skinNameSelector || '';
   $('titleSelector').value = pm_config.titleSelector || '';
-  $('operator').value = pm_config.operator || '<';
+  $('accountPriceSelector').value = pm_config.accountPriceSelector || '';
+  $('skins').value = (pm_config.skins || []).map(s => `${s.name},${s.price}`).join('\n');
   $('threshold').value = (pm_config.threshold != null) ? pm_config.threshold : 100;
   $('webhook').value = pm_config.webhook || '';
 }
@@ -76,5 +122,14 @@ $('test').onclick = async () => {
   chrome.runtime.sendMessage({ type: 'PM_TEST' });
   setStatus('已发送测试消息，请查看企业微信', true);
 };
+
+// CSV 导入：Excel 导出为 .csv（皮肤名,价格）后直接读入文本框
+$('csvFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { $('skins').value = reader.result; setStatus('已读取 CSV，记得点「保存并应用」', true); };
+  reader.readAsText(file, 'utf-8');
+});
 
 load();
