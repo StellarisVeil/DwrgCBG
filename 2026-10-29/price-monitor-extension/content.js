@@ -3,12 +3,26 @@
 //   bundle：扫描账号卡，指定皮肤参考价合计 < 阈值 → 提醒（v0.2）
 //   search ：按关键词周期搜索并价格升序，最低价 <= 阈值 → 提醒（v0.3 新增）
 // 公共风控：时段控制(inWindow) + 刷新随机抖动(nextDelay)
+// 注入方式：manifest 声明式 content_scripts（匹配 https://id5.cbg.163.com/*），无需 chrome.scripting。
+
+// 简单 glob 匹配（支持 * 通配），用于运行时按 cfg.pattern 过滤页面
+function patternMatches(pattern, url) {
+  try {
+    const u = new URL(url);
+    const reSrc = pattern
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // 转义正则特殊字符（保留 *）
+      .replace(/\*/g, '.*');                 // * → 任意
+    const re = new RegExp('^' + reSrc + '$');
+    return re.test(u.href) || re.test(u.origin + u.pathname);
+  } catch (e) { return true; }
+}
 
 (async function () {
   const CFG_KEY = 'pm_config';
   const NOTIFIED_KEY = 'pm_notified';
   const { [CFG_KEY]: cfg } = await chrome.storage.local.get(CFG_KEY);
   if (!cfg || !cfg.enabled) return;
+  if (cfg.pattern && !patternMatches(cfg.pattern, location.href)) return;
   let notified = (await chrome.storage.local.get(NOTIFIED_KEY))[NOTIFIED_KEY] || {};
 
   function parseNum(s) {

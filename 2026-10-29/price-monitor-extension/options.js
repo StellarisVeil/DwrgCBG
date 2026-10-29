@@ -1,36 +1,11 @@
 // options.js — 配置页逻辑：读写配置、注册/注销 content script、解析皮肤清单、CSV 导入、测试、清空去重记录、模式切换
 const $ = (id) => document.getElementById(id);
-const SCRIPT_ID = 'pm-monitor';
 
 // 预置真实皮肤清单（mr.z 提供，2026-10-29）：皮肤名,参考价
 const DEFAULT_SKINS =
 `于此岸赴宴,300
 蜃景,1000
 赤宴,1200`;
-
-async function unregister() {
-  try {
-    await chrome.scripting.unregisterContentScript({ id: SCRIPT_ID });
-  } catch (e) { /* 脚本不存在时忽略 */ }
-}
-
-// 用单数 API（registerContentScript 传单个脚本对象，兼容性最好，避免复数版数组签名问题）：
-// 直接注册；若 id 已存在(Duplicate)则改为 update（支持改 pattern）。不在注册前先 unregister。
-async function register(pattern) {
-  const script = { id: SCRIPT_ID, matches: [pattern], js: ['content.js'], runAt: 'document_idle' };
-  try {
-    await chrome.scripting.registerContentScript(script);
-  } catch (e) {
-    const msg = (e && e.message) || '';
-    if (/Duplicate script ID/i.test(msg)) {
-      await chrome.scripting.updateContentScript(script);
-    } else if (/Nonexistent script ID/i.test(msg)) {
-      /* 不会发生，忽略 */
-    } else {
-      throw e;
-    }
-  }
-}
 
 function setStatus(msg, ok) {
   const s = $('status');
@@ -140,20 +115,15 @@ async function save() {
 
   await chrome.storage.local.set({ pm_config: cfg });
 
-  if (cfg.enabled && cfg.pattern) {
-    try {
-      await register(cfg.pattern);
-      let msg = `已保存并启用监控（${mode === 'search' ? '搜索比价' : '皮肤套餐'}），匹配: ${cfg.pattern}`;
-      if (cfg.timeWindowEnabled) msg += `；时段 ${cfg.windowStart}-${cfg.windowEnd} 点`;
-      msg += `；间隔 ${cfg.baseInterval}+${cfg.jitter}s 随机`;
-      setStatus(msg, true);
-    } catch (e) {
-      setStatus('保存成功，但注册脚本失败: ' + e.message, false);
-    }
-  } else {
-    await unregister();
-    setStatus('已保存，但未启用监控（勾选「启用监控」并保存后才会开始监控）', true);
+  // 注入改由 manifest 声明式 content_scripts 完成，此处只写配置；启用则由 content.js 读取 cfg.enabled 生效。
+  const modeName = mode === 'search' ? '搜索比价' : '皮肤套餐';
+  let msg = `已保存（${cfg.enabled ? '已启用监控' : '未启用监控'}，${modeName}）`;
+  if (cfg.enabled) {
+    if (cfg.timeWindowEnabled) msg += `；时段 ${cfg.windowStart}-${cfg.windowEnd} 点`;
+    msg += `；间隔 ${cfg.baseInterval}+${cfg.jitter}s 随机`;
   }
+  msg += '。脚本由扩展声明式注入，打开藏宝阁页面即自动运行。';
+  setStatus(msg, true);
 }
 
 async function load() {
