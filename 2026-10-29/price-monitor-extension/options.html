@@ -10,6 +10,8 @@
   textarea { font-family: ui-monospace, Menlo, Consolas, monospace; }
   .hint { color: #666; font-size: 12px; margin-top: 2px; }
   .row { margin-bottom: 6px; }
+  .section { border: 1px solid #e3e3e3; border-radius: 6px; padding: 8px 12px; margin: 10px 0; }
+  .section h3 { margin: 4px 0 8px; font-size: 15px; }
   button { margin-top: 16px; margin-right: 8px; padding: 8px 16px; cursor: pointer; }
   #status { margin-top: 14px; font-weight: 600; }
 </style>
@@ -22,7 +24,15 @@
 <div class="row">
   <label>监控页面地址（支持 * 通配）</label>
   <input id="pattern" placeholder="https://id5.cbg.163.com/*">
-  <div class="hint">匹配到的页面会被自动注入监控脚本（首页推荐流、搜索结果页均可）。</div>
+  <div class="hint">脚本注入匹配到的页面；搜索模式下标签页会在此域内自动跳转搜索。</div>
+</div>
+
+<div class="row">
+  <label>监控模式</label>
+  <select id="mode">
+    <option value="bundle">皮肤套餐（指定皮肤合计参考价）</option>
+    <option value="search">搜索比价（关键词最低价）</option>
+  </select>
 </div>
 
 <div class="row">
@@ -34,11 +44,11 @@
   <input id="jitter" type="number" value="30" min="0">
   <div class="hint">实际间隔 = 基础间隔 + 0~抖动 之间的随机数，避免固定节奏被风控识别。</div>
 </div>
-<div class="row"><label>整页刷新（关闭则仅定时重新扫描，不重载页面）</label><input type="checkbox" id="reload" checked></div>
+<div class="row"><label>整页刷新（皮肤套餐模式用；搜索模式始终按关键词跳转）</label><input type="checkbox" id="reload" checked></div>
 
 <hr>
 
-<div class="row"><label>时段控制（仅在该时段内扫描/刷新，时段外静默等待）</label><input type="checkbox" id="timeWindowEnabled"></div>
+<div class="row"><label>时段控制（仅在该时段内扫描/搜索，时段外静默等待）</label><input type="checkbox" id="timeWindowEnabled"></div>
 <div class="row">
   <label>时段起 / 止（小时 0-23，可跨午夜，如 22 → 8）</label>
   <div style="display:flex; gap:8px;">
@@ -48,41 +58,60 @@
   <div class="hint">例：9 → 23 表示 9 点至 23 点；22 → 8 表示 22 点至次日 8 点。时段外不刷新、不扫描，只静默等待。</div>
 </div>
 
-<hr>
-
-<div class="row">
-  <label>账号卡容器选择器（匹配每一个卖号）</label>
-  <input id="itemSelector" placeholder=".product-item.product-item-cards">
-</div>
-<div class="row">
-  <label>皮肤名选择器（账号卡内，匹配每个皮肤名）</label>
-  <input id="skinNameSelector" placeholder=".card-item .name-wrap .name">
-</div>
-<div class="row">
-  <label>账号标题选择器（去重/展示，可选）</label>
-  <input id="titleSelector" placeholder=".main-title">
-</div>
-<div class="row">
-  <label>账号售价选择器（仅展示，可选）</label>
-  <input id="accountPriceSelector" placeholder=".row-hd .price">
-</div>
-
-<hr>
-
-<div class="row">
-  <label>目标皮肤清单（每行一个：皮肤名,参考价）</label>
-  <textarea id="skins" rows="10" placeholder="司药,30&#10;石榴碟小姐,50&#10;片刻闲暇,40"></textarea>
-  <div class="hint">
-    这里的价格是你自己的参考价（来自后续 Excel）。页面只判断账号“有没有”这些皮肤，价格用这里的数值求和。<br>
-    支持直接粘贴 Excel 导出的 CSV（皮肤名,价格 每行一个）。点「导入CSV」可读取本地 .csv 文件。
+<!-- 皮肤套餐模式配置 -->
+<div class="section" id="bundleSection">
+  <h3>皮肤套餐模式</h3>
+  <div class="row">
+    <label>账号卡容器选择器（匹配每一个卖号）</label>
+    <input id="itemSelector" placeholder=".product-item.product-item-cards">
   </div>
-  <input type="file" id="csvFile" accept=".csv,text/csv" style="margin-top:6px;">
+  <div class="row">
+    <label>皮肤名选择器（账号卡内，匹配每个皮肤名）</label>
+    <input id="skinNameSelector" placeholder=".card-item .name-wrap .name">
+  </div>
+  <div class="row">
+    <label>账号标题选择器（去重/展示，可选）</label>
+    <input id="titleSelector" placeholder=".main-title">
+  </div>
+  <div class="row">
+    <label>账号售价选择器（仅展示，可选）</label>
+    <input id="accountPriceSelector" placeholder=".row-hd .price">
+  </div>
+  <div class="row">
+    <label>目标皮肤清单（每行一个：皮肤名,参考价）</label>
+    <textarea id="skins" rows="8" placeholder="司药,30&#10;石榴碟小姐,50&#10;片刻闲暇,40"></textarea>
+    <div class="hint">这里的价格是你自己的参考价（来自后续 Excel）。页面只判断账号“有没有”这些皮肤，价格用这里的数值求和。支持粘贴 Excel 导出的 CSV，点「导入CSV」读取。</div>
+    <input type="file" id="csvFile" accept=".csv,text/csv" style="margin-top:6px;">
+  </div>
+  <div class="row">
+    <label>合计参考价阈值（命中皮肤参考价之和 &lt; 该值才提醒）</label>
+    <input id="threshold" type="number" value="100">
+  </div>
 </div>
 
-<div class="row">
-  <label>合计参考价阈值（命中皮肤参考价之和 &lt; 该值才提醒）</label>
-  <input id="threshold" type="number" value="100">
-  <div class="hint">例：阈值 100，账号同时拥有「司药(30)+长夜(25)」合计 55 &lt; 100 → 提醒。</div>
+<!-- 搜索比价模式配置 -->
+<div class="section" id="searchSection">
+  <h3>搜索比价模式</h3>
+  <div class="row">
+    <label>搜索关键词（每行一个，依次轮询）</label>
+    <textarea id="keywords" rows="6" placeholder="赤宴&#10;红夫人&#10;红蝶"></textarea>
+    <div class="hint">每隔一个随机间隔，自动跳转到该关键词的搜索结果（按价格升序），取最低价判断是否达标。</div>
+  </div>
+  <div class="row">
+    <label>搜索 URL 模板（{keyword} 会被替换为编码后的关键词）</label>
+    <input id="searchUrlTemplate" placeholder="https://id5.cbg.163.com/cgi/mweb/pl?keyword={keyword}&order_by=price%20ASC">
+    <div class="hint">默认已按赤宴那条的格式拼好（keyword + 价格升序）。若你的链接带 refer_sn 等必要参数，把完整可用链接粘在这里、把关键词位置换成 {keyword} 即可。</div>
+  </div>
+  <div class="row">
+    <label>最低价目标（最低价 ≤ 该值才提醒）</label>
+    <input id="searchPriceThreshold" type="number" value="50">
+    <div class="hint">例：目标 50，某关键词最低价 48 → 提醒；最低价 60 → 不提醒。价格每次创新低会再次提醒一次。</div>
+  </div>
+  <div class="row">
+    <label>最低价所在元素选择器（默认同账号售价）</label>
+    <input id="searchPriceSelector" placeholder=".row-hd .price">
+    <div class="hint">搜索结果第一个卡片的价格。默认沿用首页的 .row-hd .price；若搜索页结构不同，按实际改这里。</div>
+  </div>
 </div>
 
 <hr>

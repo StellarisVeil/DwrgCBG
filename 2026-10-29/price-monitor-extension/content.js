@@ -1,15 +1,14 @@
-// content.js — 注入到监控页面（如藏宝阁首页/搜索流）
-// 风控策略：①时段控制（仅窗口内扫描/刷新）②刷新随机抖动（基础间隔 + 随机秒数）
-// 业务逻辑：扫描每个账号卡 → 看它拥有哪些皮肤（按名字匹配） → 累加清单里这些皮肤的参考价
-//          → 若合计 < 阈值 → 命中，推送一次（去重）。皮肤参考价来自配置（你后续用 Excel/CSV 提供）。
+// content.js — 注入到监控页面（藏宝阁）
+// 两种模式：
+//   bundle：扫描账号卡，指定皮肤参考价合计 < 阈值 → 提醒（v0.2）
+//   search ：按关键词周期搜索并价格升序，最低价 <= 阈值 → 提醒（v0.3 新增）
+// 公共风控：时段控制(inWindow) + 刷新随机抖动(nextDelay)
 
 (async function () {
   const CFG_KEY = 'pm_config';
   const NOTIFIED_KEY = 'pm_notified';
-
   const { [CFG_KEY]: cfg } = await chrome.storage.local.get(CFG_KEY);
   if (!cfg || !cfg.enabled) return;
-
   let notified = (await chrome.storage.local.get(NOTIFIED_KEY))[NOTIFIED_KEY] || {};
 
   function parseNum(s) {
@@ -18,31 +17,30 @@
     return m ? parseFloat(m[0]) : null;
   }
   function norm(s) { return (s || '').trim().replace(/\s+/g, ' '); }
-  function matchSkin(pageName, targetName) {
-    const p = norm(pageName), t = norm(targetName);
+  function matchSkin(a, b) {
+    const p = norm(a), t = norm(b);
     if (!p || !t) return false;
     return p === t || p.includes(t) || t.includes(p);
   }
 
-  // ① 时段控制：是否在允许监控的时段内
+  // ① 时段控制
   function inWindow() {
     if (!cfg.timeWindowEnabled) return true;
     const h = new Date().getHours();
-    const s = parseInt(cfg.windowStart, 10);
-    const e = parseInt(cfg.windowEnd, 10);
-    if (isNaN(s) || isNaN(e) || s === e) return true; // 未正确配置 → 放行
-    if (s < e) return h >= s && h < e;                // 同日：9→23
-    return h >= s || h < e;                            // 跨午夜：22→8
+    const s = parseInt(cfg.windowStart, 10), e = parseInt(cfg.windowEnd, 10);
+    if (isNaN(s) || isNaN(e) || s === e) return true;
+    if (s < e) return h >= s && h < e;
+    return h >= s || h < e;
   }
-
-  // ② 刷新随机：基础间隔 + [0, jitter) 秒随机
+  // ② 刷新随机抖动
   function nextDelay() {
     const base = Math.max(1, parseInt(cfg.baseInterval != null ? cfg.baseInterval : cfg.intervalSec, 10) || 60);
     const jit = Math.max(0, parseInt(cfg.jitter, 10) || 0);
     return (base + Math.random() * jit) * 1000;
   }
 
-  function scan() {
+  // ---------- bundle 模式 ----------
+  function scanBundle() {
     if (!cfg.itemSelector || !cfg.skinNameSelector ||
         !Array.isArray(cfg.skins) || !cfg.skins.length) return;
     const items = document.querySelectorAll(cfg.itemSelector);
@@ -51,58 +49,74 @@
       const nameEls = item.querySelectorAll(cfg.skinNameSelector);
       const pageNames = Array.from(nameEls).map(e => norm(e.textContent));
       let acctTitle = '';
-      if (cfg.titleSelector) {
-        const t = item.querySelector(cfg.titleSelector);
-        if (t) acctTitle = norm(t.textContent);
-      }
+      if (cfg.titleSelector) { const t = item.querySelector(cfg.titleSelector); if (t) acctTitle = norm(t.textContent); }
       let acctPrice = null;
-      if (cfg.accountPriceSelector) {
-        const p = item.querySelector(cfg.accountPriceSelector);
-        if (p) acctPrice = parseNum(p.textContent);
-      }
-      const matched = [];
-      let sum = 0;
+      if (cfg.accountPriceSelector) { const p = item.querySelector(cfg.accountPriceSelector); if (p) acctPrice = parseNum(p.textContent); }
+      const matched = []; let sum = 0;
       for (const sk of cfg.skins) {
-        if (pageNames.some(pn => matchSkin(pn, sk.name))) {
-          matched.push(sk);
-          sum += (parseFloat(sk.price) || 0);
-        }
+        if (pageNames.some(pn => matchSkin(pn, sk.name))) { matched.push(sk); sum += (parseFloat(sk.price) || 0); }
       }
       if (matched.length && sum < cfg.threshold) {
         const key = (acctTitle || location.href) + '|' + matched.map(m => m.name).sort().join(',');
         if (!notified[key]) {
           notified[key] = Date.now();
-          hits.push({
-            title: acctTitle || '(未命名账号)',
-            acctPrice,
-            matched,
-            sum: Math.round(sum * 100) / 100,
-            url: location.href
-          });
+          hits.push({ kind: 'bundle', title: acctTitle || '(未命名账号)', acctPrice, matched, sum: Math.round(sum * 100) / 100, url: location.href });
         }
       }
     });
-    if (hits.length) {
-      chrome.runtime.sendMessage({ type: 'PM_HITS', hits });
-      chrome.storage.local.set({ [NOTIFIED_KEY]: notified });
+    if (hits.length) { chrome.runtime.sendMessage({ type: 'PM_HITS', hits }); chrome.storage.local.set({ [NOTIFIED_KEY]: notified }); }
+  }
+
+  // ---------- search 模式 ----------
+  function getParam(name) { try { return new URL(location.href).searchParams.get(name); } catch { return null; } }
+  function isSearchPage() {
+    try { const u = new URL(location.href); return u.pathname.includes('/pl') && u.searchParams.has('keyword'); } catch { return false; }
+  }
+  function buildSearchUrl(kw) {
+    const tpl = cfg.searchUrlTemplate || 'https://id5.cbg.163.com/cgi/mweb/pl?keyword={keyword}&order_by=price%20ASC';
+    return tpl.replace('{keyword}', encodeURIComponent(kw));
+  }
+  function runSearchCycle() {
+    const kws = (cfg.keywords || []).map(s => s.trim()).filter(Boolean);
+    if (!kws.length) return;
+    const cur = getParam('keyword');
+    if (isSearchPage() && cur) {
+      const items = document.querySelectorAll(cfg.itemSelector || '.product-item.product-item-cards');
+      if (items.length) {
+        const first = items[0]; // order_by=price ASC → 第一个即最低价
+        const priceEl = first.querySelector(cfg.searchPriceSelector || '.row-hd .price');
+        const price = priceEl ? parseNum(priceEl.textContent) : null;
+        if (price != null && price <= cfg.searchPriceThreshold) {
+          const key = 'search|' + cur + '|' + price;
+          if (!notified[key]) {
+            notified[key] = Date.now();
+            chrome.runtime.sendMessage({
+              type: 'PM_HITS',
+              hits: [{ kind: 'search', keyword: decodeURIComponent(cur), price, threshold: cfg.searchPriceThreshold, url: location.href }]
+            });
+            chrome.storage.local.set({ [NOTIFIED_KEY]: notified });
+          }
+        }
+      }
+    }
+    // 轮到下一个关键词（URL 导航会重载脚本，进入下一轮）
+    const idx = cur ? kws.indexOf(decodeURIComponent(cur)) : -1;
+    const nextKw = kws[(idx + 1 + kws.length) % kws.length];
+    setTimeout(() => { location.href = buildSearchUrl(nextKw); }, nextDelay());
+  }
+
+  // ---------- 调度 ----------
+  function tick() {
+    if (!inWindow()) { setTimeout(tick, nextDelay()); return; } // 时段外静默等待
+    if (cfg.mode === 'search') { runSearchCycle(); return; }
+    // bundle 模式
+    if (cfg.reload) {
+      scanBundle();
+      setTimeout(() => location.reload(), nextDelay());
+    } else {
+      scanBundle();
+      setTimeout(tick, nextDelay());
     }
   }
-
-  // 初次：仅在时段内扫描一次
-  if (inWindow()) scan();
-
-  // 调度：递归 setTimeout 实现随机抖动；时段外不刷新、只静默空转等待窗口开启
-  function schedule() {
-    const delay = nextDelay();
-    setTimeout(() => {
-      if (cfg.reload) {
-        if (inWindow()) { location.reload(); return; } // 时段内才真正刷新（重载后脚本重跑）
-        schedule();                                     // 时段外：不刷新，继续等待
-      } else {
-        if (inWindow()) scan();
-        schedule();
-      }
-    }, delay);
-  }
-  schedule();
+  tick();
 })();
