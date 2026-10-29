@@ -8,18 +8,28 @@ const DEFAULT_SKINS =
 蜃景,1000
 赤宴,1200`;
 
-function unregister() {
-  return chrome.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] }).catch(() => {});
+async function unregister() {
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] });
+  } catch (e) { /* 脚本不存在时忽略 */ }
 }
 
+// 注册内容脚本：直接注册；若 id 已存在(Duplicate)则改为更新（支持改 pattern）。
+// 注意：不再先调 unregister，避免在脚本还不存在时报 Nonexistent script ID。
 async function register(pattern) {
-  await unregister();
-  return chrome.scripting.registerContentScripts([{
-    id: SCRIPT_ID,
-    matches: [pattern],
-    js: ['content.js'],
-    runAt: 'document_idle'
-  }]);
+  const script = { id: SCRIPT_ID, matches: [pattern], js: ['content.js'], runAt: 'document_idle' };
+  try {
+    await chrome.scripting.registerContentScripts([script]);
+  } catch (e) {
+    const msg = (e && e.message) || '';
+    if (/Duplicate script ID/i.test(msg)) {
+      await chrome.scripting.updateContentScripts([script]);
+    } else if (/Nonexistent script ID/i.test(msg)) {
+      /* 不会发生，忽略 */
+    } else {
+      throw e;
+    }
+  }
 }
 
 function setStatus(msg, ok) {
