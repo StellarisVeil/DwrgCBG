@@ -69,8 +69,16 @@ async function save() {
   };
 
   if (mode === 'search') {
-    const keywords = $('keywords').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    if (!keywords.length) { setStatus('搜索模式需要至少填一个关键词', false); return; }
+    const rawKw = $('keywords').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (!rawKw.length) { setStatus('搜索模式需要至少填一个关键词', false); return; }
+    // 支持「关键词」或「关键词,目标价」两种写法；不带目标价则用全局 searchPriceThreshold
+    const keywords = rawKw.map(line => {
+      const i = line.indexOf(',');
+      if (i < 0) return { name: line };
+      const name = line.slice(0, i).trim();
+      const t = parseFloat(line.slice(i + 1).trim());
+      return { name, target: isNaN(t) ? null : t };
+    });
     cfg.keywords = keywords;
     cfg.searchUrlTemplate = $('searchUrlTemplate').value.trim() ||
       'https://id5.cbg.163.com/cgi/mweb/pl?keyword={keyword}&order_by=price%20ASC';
@@ -117,7 +125,7 @@ async function load() {
   const { pm_config } = await chrome.storage.local.get('pm_config');
   if (!pm_config) {
     $('pattern').value = 'https://id5.cbg.163.com/*';
-    $('mode').value = 'bundle';
+    $('mode').value = 'search';
     $('baseInterval').value = 60;
     $('jitter').value = 30;
     $('reload').checked = true;
@@ -131,6 +139,7 @@ async function load() {
     $('accountPriceSelector').value = '.row-hd .price';
     $('skins').value = DEFAULT_SKINS;
     $('threshold').value = 2000;
+    $('keywords').value = '于此岸赴宴,300\n蜃景,1000\n赤宴,1200';
     applyModeVisibility();
     return;
   }
@@ -150,7 +159,7 @@ async function load() {
   $('accountPriceSelector').value = pm_config.accountPriceSelector || '.row-hd .price';
   $('skins').value = (pm_config.skins || []).map(s => `${s.name},${s.price}`).join('\n');
   $('threshold').value = (pm_config.threshold != null) ? pm_config.threshold : 100;
-  $('keywords').value = (pm_config.keywords || []).join('\n');
+  $('keywords').value = (pm_config.keywords || []).map(k => (k && typeof k === 'object') ? (k.target != null ? `${k.name},${k.target}` : k.name) : k).join('\n');
   $('searchUrlTemplate').value = pm_config.searchUrlTemplate ||
     'https://id5.cbg.163.com/cgi/mweb/pl?keyword={keyword}&order_by=price%20ASC';
   $('searchPriceThreshold').value = (pm_config.searchPriceThreshold != null) ? pm_config.searchPriceThreshold : 50;

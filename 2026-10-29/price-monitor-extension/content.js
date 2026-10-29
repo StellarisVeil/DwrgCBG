@@ -87,10 +87,17 @@
     const tpl = cfg.searchUrlTemplate || 'https://id5.cbg.163.com/cgi/mweb/pl?keyword={keyword}&order_by=price%20ASC';
     return tpl.replace('{keyword}', encodeURIComponent(kw));
   }
+  // 关键词可能是字符串，或 {name, target} 对象（单独设目标价）
+  function kwName(kw) { return (kw && typeof kw === 'object') ? kw.name : kw; }
+  function kwTarget(kw) {
+    if (kw && typeof kw === 'object' && kw.target != null) return kw.target;
+    return cfg.searchPriceThreshold;
+  }
   function runSearchCycle() {
-    const kws = (cfg.keywords || []).map(s => s.trim()).filter(Boolean);
+    const kws = (cfg.keywords || []).filter(Boolean);
     if (!kws.length) return;
     const cur = getParam('keyword');
+    const curName = cur ? decodeURIComponent(cur) : '';
     if (isSearchPage() && cur) {
       const items = document.querySelectorAll(cfg.itemSelector || '.product-item.product-item-cards');
       if (items.length) {
@@ -98,13 +105,15 @@
         const priceEl = first.querySelector(cfg.searchPriceSelector || '.row-hd .price');
         const price = priceEl ? parseNum(priceEl.textContent) : null;
         const link = extractLink(first);
-        if (price != null && price <= cfg.searchPriceThreshold) {
+        const curKw = kws.find(k => kwName(k) === curName) || kws[0];
+        const target = kwTarget(curKw); // 该词单独目标价，缺省用全局阈值
+        if (price != null && price <= target) {
           const key = 'search|' + cur + '|' + price;
           if (!notified[key]) {
             notified[key] = Date.now();
             chrome.runtime.sendMessage({
               type: 'PM_HITS',
-              hits: [{ kind: 'search', keyword: decodeURIComponent(cur), price, threshold: cfg.searchPriceThreshold, url: location.href, link }]
+              hits: [{ kind: 'search', keyword: curName, price, threshold: target, url: location.href, link }]
             });
             chrome.storage.local.set({ [NOTIFIED_KEY]: notified });
           }
@@ -112,9 +121,9 @@
       }
     }
     // 轮到下一个关键词（URL 导航会重载脚本，进入下一轮）
-    const idx = cur ? kws.indexOf(decodeURIComponent(cur)) : -1;
+    const idx = kws.findIndex(k => kwName(k) === curName);
     const nextKw = kws[(idx + 1 + kws.length) % kws.length];
-    setTimeout(() => { location.href = buildSearchUrl(nextKw); }, nextDelay());
+    setTimeout(() => { location.href = buildSearchUrl(kwName(nextKw)); }, nextDelay());
   }
 
   // ---------- 调度 ----------

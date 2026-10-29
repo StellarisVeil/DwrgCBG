@@ -99,9 +99,9 @@
 <div class="section" id="searchSection">
   <h3>搜索比价模式</h3>
   <div class="row">
-    <label>搜索关键词（每行一个，依次轮询）</label>
-    <textarea id="keywords" rows="6" placeholder="赤宴&#10;红夫人&#10;红蝶"></textarea>
-    <div class="hint">每隔一个随机间隔，自动跳转到该关键词的搜索结果（按价格升序），取最低价判断是否达标。</div>
+    <label>搜索关键词（每行一个，依次轮询；可加「,目标价」单独设阈值）</label>
+    <textarea id="keywords" rows="6" placeholder="于此岸赴宴,300&#10;蜃景,1000&#10;赤宴,1200"></textarea>
+    <div class="hint">每隔一个随机间隔，自动跳转到该关键词的搜索结果（按价格升序），取最低价与该词的目标价比较；未写目标价则用下方「最低价目标」作全局默认。mr.z 这批：每个皮肤单独搜索、各自带目标价。</div>
   </div>
   <div class="row">
     <label>搜索 URL 模板（{keyword} 会被替换为编码后的关键词）</label>
@@ -109,9 +109,9 @@
     <div class="hint">默认已按赤宴那条的格式拼好（keyword + 价格升序）。若你的链接带 refer_sn 等必要参数，把完整可用链接粘在这里、把关键词位置换成 {keyword} 即可。</div>
   </div>
   <div class="row">
-    <label>最低价目标（最低价 ≤ 该值才提醒）</label>
+    <label>最低价目标（全局默认；仅当某关键词未写「,目标价」时使用）</label>
     <input id="searchPriceThreshold" type="number" value="50">
-    <div class="hint">例：目标 50，某关键词最低价 48 → 提醒；最低价 60 → 不提醒。价格每次创新低会再次提醒一次。</div>
+    <div class="hint">例：目标 50，某关键词最低价 48 → 提醒；最低价 60 → 不提醒。每个关键词单独写「,目标价」后以此处为兜底。价格每次创新低会再次提醒一次。</div>
   </div>
   <div class="row">
     <label>最低价所在元素选择器（默认同账号售价）</label>
