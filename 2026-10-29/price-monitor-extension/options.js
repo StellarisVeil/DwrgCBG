@@ -2,13 +2,11 @@
 const $ = (id) => document.getElementById(id);
 const SCRIPT_ID = 'pm-monitor';
 
-// 预置假数据：让功能在没有真实 Excel 时也能跑通演示
+// 预置真实皮肤清单（mr.z 提供，2026-10-29）：皮肤名,参考价
 const DEFAULT_SKINS =
-`司药,30
-石榴碟小姐,50
-片刻闲暇,40
-长夜,25
-欧律狄刻,35`;
+`于此岸赴宴,300
+蜃景,1000
+赤宴,1200`;
 
 function unregister() {
   return chrome.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] }).catch(() => {});
@@ -132,7 +130,7 @@ async function load() {
     $('titleSelector').value = '.main-title';
     $('accountPriceSelector').value = '.row-hd .price';
     $('skins').value = DEFAULT_SKINS;
-    $('threshold').value = 100;
+    $('threshold').value = 2000;
     applyModeVisibility();
     return;
   }
