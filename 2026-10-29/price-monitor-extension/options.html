@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>价格监控配置</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 20px; max-width: 760px; }
+  label { display: block; margin: 14px 0 4px; font-weight: 600; }
+  input, select { width: 100%; padding: 8px; box-sizing: border-box; font-size: 14px; }
+  .hint { color: #666; font-size: 12px; margin-top: 2px; }
+  .row { margin-bottom: 6px; }
+  button { margin-top: 16px; margin-right: 8px; padding: 8px 16px; cursor: pointer; }
+  #status { margin-top: 14px; font-weight: 600; }
+</style>
+</head>
+<body>
+<h2>价格监控提醒 · 配置</h2>
+
+<div class="row"><label>启用监控</label><input type="checkbox" id="enabled"></div>
+
+<div class="row">
+  <label>监控页面地址（支持 * 通配）</label>
+  <input id="pattern" placeholder="https://search.jd.com/Search?keyword=*">
+  <div class="hint">例：https://*.jd.com/* 或带关键词的完整页。匹配到的页面会被自动注入监控脚本。</div>
+</div>
+
+<div class="row">
+  <label>刷新间隔（秒）</label>
+  <input id="intervalSec" type="number" value="30" min="1">
+</div>
+
+<div class="row"><label>整页刷新（关闭则仅定时重新扫描，不重载页面）</label><input type="checkbox" id="reload" checked></div>
+
+<hr>
+
+<div class="row">
+  <label>商品条目选择器（CSS，匹配每一个商品）</label>
+  <input id="itemSelector" placeholder=".gl-item">
+</div>
+<div class="row">
+  <label>价格字段选择器（相对商品条目，提取价格文本）</label>
+  <input id="fieldSelector" placeholder=".p-price strong">
+</div>
+<div class="row">
+  <label>标题选择器（用于去重，可选）</label>
+  <input id="titleSelector" placeholder=".p-name a">
+  <div class="hint">留空则退化为取条目前 60 字作为去重主键。</div>
+</div>
+
+<div class="row">
+  <label>比较方式</label>
+  <select id="operator">
+    <option value="<">&lt; 小于阈值（价格便宜时提醒）</option>
+    <option value="<=">&le; 小于等于阈值</option>
+    <option value=">">&gt; 大于阈值</option>
+    <option value=">=">&ge; 大于等于阈值</option>
+  </select>
+</div>
+
+<div class="row"><label>阈值</label><input id="threshold" type="number" value="100"></div>
+
+<hr>
+
+<div class="row">
+  <label>企业微信机器人 Webhook 地址</label>
+  <input id="webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx">
+</div>
+
+<button id="save">保存并应用</button>
+<button id="clear">清空已通知记录</button>
+<button id="test">发送测试消息</button>
+<div id="status"></div>
+
+<script src="options.js"></script>
+</body>
+</html>
