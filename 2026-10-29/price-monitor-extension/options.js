@@ -142,7 +142,7 @@ async function save() {
     }
   } else {
     await unregister();
-    setStatus('已保存（未启用或缺少必填项，已停止注入）', true);
+    setStatus('已保存，但未启用监控（勾选「启用监控」并保存后才会开始监控）', true);
   }
 }
 
