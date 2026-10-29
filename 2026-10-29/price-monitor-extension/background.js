@@ -21,7 +21,7 @@ async function handleHits(hits) {
         `### 🔍 搜索比价提醒\n` +
         `**关键词**: ${h.keyword}\n` +
         `**最低价**: ¥${h.price}（目标 ≤ ¥${h.threshold}）\n` +
-        `**页面**: [打开](${h.url})\n` +
+        `**商品链接**: [点此查看](${h.link || h.url})\n` +
         `> 检测时间: ${new Date().toLocaleString('zh-CN')}`;
     } else {
       const skinLines = (h.matched || []).map(m => `- ${m.name}：¥${m.price}`).join('\n');
@@ -31,7 +31,7 @@ async function handleHits(hits) {
         `**命中皮肤**:\n${skinLines}\n` +
         `**合计参考价**: ¥${h.sum}` +
         (h.acctPrice != null ? `（账号售价 ¥${h.acctPrice}）` : '') + `\n` +
-        `**页面**: [打开](${h.url})\n` +
+        `**商品链接**: [点此查看](${h.link || h.url})\n` +
         `> 检测时间: ${new Date().toLocaleString('zh-CN')}`;
     }
     await sendToWeCom(pm_config.webhook, content);

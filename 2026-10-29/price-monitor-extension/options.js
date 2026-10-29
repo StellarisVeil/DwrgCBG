@@ -66,6 +66,7 @@ async function save() {
     windowStart: parseInt($('windowStart').value, 10) || 0,
     windowEnd: parseInt($('windowEnd').value, 10) || 0,
     itemSelector: $('itemSelector').value.trim(),
+    linkSelector: $('linkSelector').value.trim(),
     webhook: $('webhook').value.trim()
   };
 
@@ -126,6 +127,7 @@ async function load() {
     $('windowStart').value = 9;
     $('windowEnd').value = 23;
     $('itemSelector').value = '.product-item.product-item-cards';
+    $('linkSelector').value = '';
     $('skinNameSelector').value = '.card-item .name-wrap .name';
     $('titleSelector').value = '.main-title';
     $('accountPriceSelector').value = '.row-hd .price';
@@ -144,6 +146,7 @@ async function load() {
   $('windowStart').value = (pm_config.windowStart != null) ? pm_config.windowStart : 9;
   $('windowEnd').value = (pm_config.windowEnd != null) ? pm_config.windowEnd : 23;
   $('itemSelector').value = pm_config.itemSelector || '.product-item.product-item-cards';
+  $('linkSelector').value = pm_config.linkSelector || '';
   $('skinNameSelector').value = pm_config.skinNameSelector || '.card-item .name-wrap .name';
   $('titleSelector').value = pm_config.titleSelector || '.main-title';
   $('accountPriceSelector').value = pm_config.accountPriceSelector || '.row-hd .price';

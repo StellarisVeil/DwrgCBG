@@ -58,6 +58,12 @@
   <div class="hint">例：9 → 23 表示 9 点至 23 点；22 → 8 表示 22 点至次日 8 点。时段外不刷新、不扫描，只静默等待。</div>
 </div>
 
+<div class="row">
+  <label>商品链接选择器（命中后通知里附上可点击进商品页的链接，可选）</label>
+  <input id="linkSelector" placeholder="a[href]（默认自动取卡片内第一个带 href 的链接）">
+  <div class="hint">留空则自动探测卡片内第一个 &lt;a href&gt; 并解析为绝对地址；若页面链接结构特殊，填具体选择器（如 .product-item a）。探测不到时回退到当前页面地址。两种模式共用。</div>
+</div>
+
 <!-- 皮肤套餐模式配置 -->
 <div class="section" id="bundleSection">
   <h3>皮肤套餐模式</h3>

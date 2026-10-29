@@ -22,6 +22,16 @@
     if (!p || !t) return false;
     return p === t || p.includes(t) || t.includes(p);
   }
+  // ③ 提取卡片内可点击的商品链接：优先用配置的选择器，否则自动取卡片内第一个带 href 的 <a>；相对地址解析为绝对地址；都拿不到回退当前页。
+  function extractLink(item) {
+    const sel = (cfg.linkSelector && cfg.linkSelector.trim()) || 'a[href]';
+    let el = null;
+    try { el = item.querySelector(sel); } catch (e) { el = null; }
+    if (!el) return null;
+    const href = el.getAttribute('href') || el.getAttribute('data-href');
+    if (!href) return null;
+    try { return new URL(href, location.href).href; } catch (e) { return href; }
+  }
 
   // ① 时段控制
   function inWindow() {
@@ -52,6 +62,7 @@
       if (cfg.titleSelector) { const t = item.querySelector(cfg.titleSelector); if (t) acctTitle = norm(t.textContent); }
       let acctPrice = null;
       if (cfg.accountPriceSelector) { const p = item.querySelector(cfg.accountPriceSelector); if (p) acctPrice = parseNum(p.textContent); }
+      const link = extractLink(item);
       const matched = []; let sum = 0;
       for (const sk of cfg.skins) {
         if (pageNames.some(pn => matchSkin(pn, sk.name))) { matched.push(sk); sum += (parseFloat(sk.price) || 0); }
@@ -60,7 +71,7 @@
         const key = (acctTitle || location.href) + '|' + matched.map(m => m.name).sort().join(',');
         if (!notified[key]) {
           notified[key] = Date.now();
-          hits.push({ kind: 'bundle', title: acctTitle || '(未命名账号)', acctPrice, matched, sum: Math.round(sum * 100) / 100, url: location.href });
+          hits.push({ kind: 'bundle', title: acctTitle || '(未命名账号)', acctPrice, matched, sum: Math.round(sum * 100) / 100, url: location.href, link });
         }
       }
     });
@@ -86,13 +97,14 @@
         const first = items[0]; // order_by=price ASC → 第一个即最低价
         const priceEl = first.querySelector(cfg.searchPriceSelector || '.row-hd .price');
         const price = priceEl ? parseNum(priceEl.textContent) : null;
+        const link = extractLink(first);
         if (price != null && price <= cfg.searchPriceThreshold) {
           const key = 'search|' + cur + '|' + price;
           if (!notified[key]) {
             notified[key] = Date.now();
             chrome.runtime.sendMessage({
               type: 'PM_HITS',
-              hits: [{ kind: 'search', keyword: decodeURIComponent(cur), price, threshold: cfg.searchPriceThreshold, url: location.href }]
+              hits: [{ kind: 'search', keyword: decodeURIComponent(cur), price, threshold: cfg.searchPriceThreshold, url: location.href, link }]
             });
             chrome.storage.local.set({ [NOTIFIED_KEY]: notified });
           }
