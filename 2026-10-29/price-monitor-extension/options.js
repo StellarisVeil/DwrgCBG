@@ -56,8 +56,12 @@ async function save() {
   const cfg = {
     enabled: $('enabled').checked,
     pattern: $('pattern').value.trim(),
-    intervalSec: Math.max(1, parseInt($('intervalSec').value, 10) || 60),
+    baseInterval: Math.max(1, parseInt($('baseInterval').value, 10) || 60),
+    jitter: Math.max(0, parseInt($('jitter').value, 10) || 0),
     reload: $('reload').checked,
+    timeWindowEnabled: $('timeWindowEnabled').checked,
+    windowStart: parseInt($('windowStart').value, 10) || 0,
+    windowEnd: parseInt($('windowEnd').value, 10) || 0,
     itemSelector: $('itemSelector').value.trim(),
     skinNameSelector: $('skinNameSelector').value.trim(),
     titleSelector: $('titleSelector').value.trim(),
@@ -73,6 +77,8 @@ async function save() {
       await register(cfg.pattern);
       let msg = `已保存并启用监控，匹配: ${cfg.pattern}；皮肤清单 ${skins.length} 条`;
       if (bad) msg += `（${bad} 行无效已忽略）`;
+      if (cfg.timeWindowEnabled) msg += `；时段 ${cfg.windowStart}-${cfg.windowEnd} 点`;
+      msg += `；刷新 ${cfg.baseInterval}+${cfg.jitter}s 随机`;
       setStatus(msg, true);
     } catch (e) {
       setStatus('保存成功，但注册脚本失败: ' + e.message, false);
@@ -86,10 +92,14 @@ async function save() {
 async function load() {
   const { pm_config } = await chrome.storage.local.get('pm_config');
   if (!pm_config) {
-    // 首次进入：预置假数据 + 藏宝阁首页默认选择器
+    // 首次进入：预置假数据 + 藏宝阁首页默认选择器 + 风控默认
     $('pattern').value = 'https://id5.cbg.163.com/*';
-    $('intervalSec').value = 60;
+    $('baseInterval').value = 60;
+    $('jitter').value = 30;
     $('reload').checked = true;
+    $('timeWindowEnabled').checked = false;
+    $('windowStart').value = 9;
+    $('windowEnd').value = 23;
     $('itemSelector').value = '.product-item.product-item-cards';
     $('skinNameSelector').value = '.card-item .name-wrap .name';
     $('titleSelector').value = '.main-title';
@@ -100,8 +110,12 @@ async function load() {
   }
   $('enabled').checked = !!pm_config.enabled;
   $('pattern').value = pm_config.pattern || '';
-  $('intervalSec').value = pm_config.intervalSec || 60;
+  $('baseInterval').value = (pm_config.baseInterval != null ? pm_config.baseInterval : (pm_config.intervalSec || 60));
+  $('jitter').value = (pm_config.jitter != null ? pm_config.jitter : 30);
   $('reload').checked = pm_config.reload !== false;
+  $('timeWindowEnabled').checked = !!pm_config.timeWindowEnabled;
+  $('windowStart').value = (pm_config.windowStart != null) ? pm_config.windowStart : 9;
+  $('windowEnd').value = (pm_config.windowEnd != null) ? pm_config.windowEnd : 23;
   $('itemSelector').value = pm_config.itemSelector || '';
   $('skinNameSelector').value = pm_config.skinNameSelector || '';
   $('titleSelector').value = pm_config.titleSelector || '';

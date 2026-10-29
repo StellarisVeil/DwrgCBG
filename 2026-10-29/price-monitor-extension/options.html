@@ -26,11 +26,27 @@
 </div>
 
 <div class="row">
-  <label>刷新间隔（秒，网易风控严，建议 ≥ 60）</label>
-  <input id="intervalSec" type="number" value="60" min="1">
+  <label>基础刷新间隔（秒）</label>
+  <input id="baseInterval" type="number" value="60" min="1">
 </div>
-
+<div class="row">
+  <label>随机抖动（秒，0 = 固定间隔）</label>
+  <input id="jitter" type="number" value="30" min="0">
+  <div class="hint">实际间隔 = 基础间隔 + 0~抖动 之间的随机数，避免固定节奏被风控识别。</div>
+</div>
 <div class="row"><label>整页刷新（关闭则仅定时重新扫描，不重载页面）</label><input type="checkbox" id="reload" checked></div>
+
+<hr>
+
+<div class="row"><label>时段控制（仅在该时段内扫描/刷新，时段外静默等待）</label><input type="checkbox" id="timeWindowEnabled"></div>
+<div class="row">
+  <label>时段起 / 止（小时 0-23，可跨午夜，如 22 → 8）</label>
+  <div style="display:flex; gap:8px;">
+    <input id="windowStart" type="number" min="0" max="23" value="9" style="width:48%">
+    <input id="windowEnd" type="number" min="0" max="23" value="23" style="width:48%">
+  </div>
+  <div class="hint">例：9 → 23 表示 9 点至 23 点；22 → 8 表示 22 点至次日 8 点。时段外不刷新、不扫描，只静默等待。</div>
+</div>
 
 <hr>
 
