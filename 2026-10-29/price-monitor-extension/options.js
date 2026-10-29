@@ -10,20 +10,20 @@ const DEFAULT_SKINS =
 
 async function unregister() {
   try {
-    await chrome.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] });
+    await chrome.scripting.unregisterContentScript({ id: SCRIPT_ID });
   } catch (e) { /* 脚本不存在时忽略 */ }
 }
 
-// 注册内容脚本：直接注册；若 id 已存在(Duplicate)则改为更新（支持改 pattern）。
-// 注意：不再先调 unregister，避免在脚本还不存在时报 Nonexistent script ID。
+// 用单数 API（registerContentScript 传单个脚本对象，兼容性最好，避免复数版数组签名问题）：
+// 直接注册；若 id 已存在(Duplicate)则改为 update（支持改 pattern）。不在注册前先 unregister。
 async function register(pattern) {
   const script = { id: SCRIPT_ID, matches: [pattern], js: ['content.js'], runAt: 'document_idle' };
   try {
-    await chrome.scripting.registerContentScripts([script]);
+    await chrome.scripting.registerContentScript(script);
   } catch (e) {
     const msg = (e && e.message) || '';
     if (/Duplicate script ID/i.test(msg)) {
-      await chrome.scripting.updateContentScripts([script]);
+      await chrome.scripting.updateContentScript(script);
     } else if (/Nonexistent script ID/i.test(msg)) {
       /* 不会发生，忽略 */
     } else {
