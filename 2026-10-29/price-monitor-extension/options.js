@@ -14,12 +14,12 @@ function unregister() {
 
 async function register(pattern) {
   await unregister();
-  return chrome.scripting.registerContentScripts({
+  return chrome.scripting.registerContentScripts([{
     id: SCRIPT_ID,
     matches: [pattern],
     js: ['content.js'],
     runAt: 'document_idle'
-  });
+  }]);
 }
 
 function setStatus(msg, ok) {
