@@ -181,12 +181,17 @@ $('test').onclick = async () => {
   setStatus('已发送测试消息，请查看企业微信', true);
 };
 
-// CSV 导入：Excel 导出为 .csv（皮肤名,价格）后直接读入文本框
+// CSV 导入：Excel 导出为 .csv（名称,价格）后按当前模式导入到对应框
 $('csvFile').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => { $('skins').value = reader.result; setStatus('已读取 CSV，记得点「保存并应用」', true); };
+  reader.onload = () => {
+    const isSearch = $('mode').value === 'search';
+    if (isSearch) $('keywords').value = reader.result;
+    else $('skins').value = reader.result;
+    setStatus('已读取 CSV（导入到' + (isSearch ? '关键词' : '皮肤清单') + '），记得点「保存并应用」', true);
+  };
   reader.readAsText(file, 'utf-8');
 });
 
