@@ -28,6 +28,19 @@ function setStatus(msg, ok) {
   s.style.color = ok ? '#0a0' : '#c00';
 }
 
+// 必填校验：把缺项的输入框和标签标红，输入时自动消红
+function setInvalid(id, bad) {
+  const el = $(id);
+  if (!el) return;
+  el.classList.toggle('invalid', bad);
+  const row = el.closest('.row');
+  const lbl = row && row.querySelector('label');
+  if (lbl) lbl.classList.toggle('invalid-label', bad);
+}
+function clearInvalid() {
+  ['pattern', 'keywords', 'skins', 'webhook'].forEach(id => setInvalid(id, false));
+}
+
 // 把文本框解析成 [{name, price}]；忽略空行和无效行
 function parseSkins(text) {
   const out = []; let bad = 0;
@@ -68,9 +81,22 @@ async function save() {
     webhook: $('webhook').value.trim()
   };
 
+  // 必填校验：缺项直接标红并列出，不继续保存
+  clearInvalid();
+  const missing = [];
+  if (!cfg.pattern) { setInvalid('pattern', true); missing.push('监控页面地址'); }
+  if (mode === 'search') {
+    const kwCount = $('keywords').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean).length;
+    if (!kwCount) { setInvalid('keywords', true); missing.push('搜索关键词'); }
+  } else {
+    const { skins } = parseSkins($('skins').value);
+    if (!skins.length) { setInvalid('skins', true); missing.push('目标皮肤清单'); }
+  }
+  if (cfg.enabled && !cfg.webhook) { setInvalid('webhook', true); missing.push('企业微信 Webhook（已启用监控，必填）'); }
+  if (missing.length) { setStatus('以下必填项未填（已标红）：' + missing.join('、'), false); return; }
+
   if (mode === 'search') {
     const rawKw = $('keywords').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    if (!rawKw.length) { setStatus('搜索模式需要至少填一个关键词', false); return; }
     // 支持「关键词」或「关键词,目标价」两种写法；不带目标价则用全局 searchPriceThreshold
     const keywords = rawKw.map(line => {
       const i = line.indexOf(',');
@@ -90,8 +116,7 @@ async function save() {
     cfg.skins = [];
     cfg.threshold = 0;
   } else {
-    const { skins, bad } = parseSkins($('skins').value);
-    if (!skins.length) { setStatus('皮肤清单为空或格式不对（应为 名称,价格 每行一个）', false); return; }
+    const { skins } = parseSkins($('skins').value);
     cfg.skinNameSelector = $('skinNameSelector').value.trim();
     cfg.titleSelector = $('titleSelector').value.trim();
     cfg.accountPriceSelector = $('accountPriceSelector').value.trim();
@@ -193,6 +218,12 @@ $('csvFile').addEventListener('change', (e) => {
     setStatus('已读取 CSV（导入到' + (isSearch ? '关键词' : '皮肤清单') + '），记得点「保存并应用」', true);
   };
   reader.readAsText(file, 'utf-8');
+});
+
+// 编辑必填项时自动消红
+['pattern', 'keywords', 'skins', 'webhook'].forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener('input', () => setInvalid(id, false));
 });
 
 load();
