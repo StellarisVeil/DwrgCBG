@@ -44,13 +44,14 @@
 </div>
 
 <div class="row">
-  <label>基础刷新间隔（秒）</label>
-  <input id="baseInterval" type="number" value="60" min="1">
+  <label>整轮间隔（秒）：把所有关键词都搜一遍之后，等多久再开始下一轮</label>
+  <input id="baseInterval" type="number" value="1800" min="60">
 </div>
 <div class="row">
   <label>随机抖动（秒，0 = 固定间隔）</label>
-  <input id="jitter" type="number" value="30" min="0">
-  <div class="hint">实际间隔 = 基础间隔 + 0~抖动 之间的随机数，避免固定节奏被风控识别。</div>
+  <input id="jitter" type="number" value="300" min="0">
+  <div class="hint">整轮间隔 = 基础间隔 + 0~抖动 之间的随机数。例：1800+300 → 每轮之间等 30~35 分钟。<br>
+搜索模式下，<b>轮内相邻两个关键词之间</b>还会自动间隔 20~45 秒的随机时间，避免短时间内连续跳转被风控。</div>
 </div>
 <div class="row"><label>整页刷新（皮肤套餐模式用；搜索模式始终按关键词跳转）</label><input type="checkbox" id="reload" checked></div>
 
@@ -67,6 +68,12 @@
 </div>
 
 <div class="row">
+  <label>商品卡片选择器（匹配列表里的每一个账号卡，两种模式共用）</label>
+  <input id="itemSelector" placeholder=".product-item.product-item-cards">
+  <div class="hint">藏宝阁列表页与搜索结果页的卡片结构一致，默认值通常不用改。若扫描不到账号/最低价，先检查这里。</div>
+</div>
+
+<div class="row">
   <label>商品链接选择器（命中后通知里附上可点击进商品页的链接，可选）</label>
   <input id="linkSelector" placeholder="a[href]（默认自动取卡片内第一个带 href 的链接）">
   <div class="hint">留空则自动探测卡片内第一个 &lt;a href&gt; 并解析为绝对地址；若页面链接结构特殊，填具体选择器（如 .product-item a）。探测不到时回退到当前页面地址。两种模式共用。</div>
@@ -75,10 +82,6 @@
 <!-- 皮肤套餐模式配置 -->
 <div class="section" id="bundleSection">
   <h3>皮肤套餐模式</h3>
-  <div class="row">
-    <label>账号卡容器选择器（匹配每一个卖号）</label>
-    <input id="itemSelector" placeholder=".product-item.product-item-cards">
-  </div>
   <div class="row">
     <label>皮肤名选择器（账号卡内，匹配每个皮肤名）</label>
     <input id="skinNameSelector" placeholder=".card-item .name-wrap .name">
@@ -125,6 +128,19 @@
     <input id="searchPriceSelector" placeholder=".row-hd .price">
     <div class="hint">搜索结果第一个卡片的价格。默认沿用首页的 .row-hd .price；若搜索页结构不同，按实际改这里。</div>
   </div>
+  <div class="row">
+    <label>轮内相邻关键词间隔（秒），默认 20~45 随机</label>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <input id="hopMinSec" type="number" min="1" value="20" style="width:48%" placeholder="最小">
+      <input id="hopMaxSec" type="number" min="1" value="45" style="width:48%" placeholder="最大">
+    </div>
+    <div class="hint">一轮里，搜完一个关键词后等这么久再搜下一个。<b>这个区间是上限范围，实际会按关键词数量自动收缩</b>：
+皮肤多了以后，会按「整轮间隔 ÷ 关键词数」自动缩短，保证一轮仍能落在你设的周期内（但绝不会低于 15 秒）。
+不建议把最小间隔设得太小。</div>
+  </div>
+  <div class="row">
+    <div id="pacePreview" style="background:#f5f6f8;border-radius:6px;padding:10px;font-size:13px;line-height:1.7;"></div>
+  </div>
 </div>
 
 <hr>
@@ -132,12 +148,48 @@
 <div class="row">
   <label>企业微信机器人 Webhook 地址</label>
   <input id="webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx">
+  <div class="hint">必填（启用监控后不填无法保存）。企业微信 → 群 → 右上角「···」→ 添加群机器人 → 复制 Webhook。</div>
 </div>
 
 <button id="save">保存并应用</button>
 <button id="clear">清空已通知记录</button>
 <button id="test">发送测试消息</button>
 <div id="status"></div>
+<div class="hint">保存后，已打开的监控页会自动刷新以应用新配置。</div>
+
+<hr>
+
+<h2 style="font-size:16px;margin-top:24px;">查询记录（用于核对与纠错）</h2>
+<div class="hint">每次扫描都会在这里留一条：什么时候查的、查的什么、底价多少、目标多少、有没有命中。只保留最近 500 条。</div>
+<div style="display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap;">
+  <button id="logRefresh" style="margin-top:0;">刷新</button>
+  <button id="logExport" style="margin-top:0;">导出 CSV</button>
+  <button id="logClear" style="margin-top:0;">清空记录</button>
+  <label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:400;font-size:13px;">
+    <input type="checkbox" id="logOnlyHit" style="width:auto;"> 只看命中
+  </label>
+  <label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:400;font-size:13px;">
+    <input type="checkbox" id="logOnlyEvent" style="width:auto;"> 只看补货/卖出
+  </label>
+</div>
+<div id="pauseBanner" style="display:none;background:#fff4e5;border:1px solid #ffb74d;border-radius:6px;padding:12px;margin:10px 0;font-size:13px;line-height:1.7;"></div>
+<div id="logSummary" style="font-size:13px;color:#333;margin-bottom:8px;"></div>
+<div style="max-height:420px;overflow:auto;border:1px solid #e3e3e3;border-radius:6px;">
+  <table id="logTable" style="width:100%;border-collapse:collapse;font-size:12px;">
+    <thead>
+      <tr style="position:sticky;top:0;background:#f5f6f8;">
+        <th style="text-align:left;padding:6px;">时间</th>
+        <th style="text-align:left;padding:6px;">模式</th>
+        <th style="text-align:left;padding:6px;">关键词/账号</th>
+        <th style="text-align:right;padding:6px;">底价</th>
+        <th style="text-align:right;padding:6px;">目标</th>
+        <th style="text-align:left;padding:6px;">结果</th>
+        <th style="text-align:left;padding:6px;">商品</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
 
 <script src="options.js"></script>
 </body>
