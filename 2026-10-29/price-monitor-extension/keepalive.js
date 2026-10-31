@@ -80,11 +80,77 @@ async function notifyStale(detail) {
   await chrome.storage.local.set({ pm_stale_notified_at: Date.now() });
 }
 
+// ---------- 时段判断（与 content.js 的 inWindow 保持一致） ----------
+// 关键：只有在"应该工作"的时段内停摆才算异常。时段外停摆是正常现象，不报警。
+function toNum(v, dflt) {
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return isFinite(n) ? n : dflt;
+}
+
+// 是否处于监控时段内（支持跨午夜，如 22 → 8）
+function inWorkWindow(cfg, at) {
+  if (!cfg || !cfg.timeWindowEnabled) return true;          // 未启用时段控制 = 全天都在时段内
+  const d = at ? new Date(at) : new Date();
+  const h = d.getHours();
+  const s = toNum(cfg.windowStart, null);
+  const e = toNum(cfg.windowEnd, null);
+  if (s == null || e == null || s === e) return true;        // 配置无效/起止相同 = 视为全天
+  if (s < e) return h >= s && h < e;                         // 普通时段
+  return h >= s || h < e;                                    // 跨午夜
+}
+
+// 距离"进入下一个工作时段"还有多少分钟（用于给刚进入时段留出宽限期）
+function minutesIntoWindow(cfg, nowMs) {
+  if (!cfg || !cfg.timeWindowEnabled) return Infinity;
+  const s = toNum(cfg.windowStart, null);
+  if (s == null) return Infinity;
+  const now = new Date(nowMs);
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), s, 0, 0, 0);
+  // 若当前已过今天的起始时刻，说明是本段内（含跨午夜的"今天起点是昨天"情形）
+  let startedAt = start.getTime();
+  if (startedAt > nowMs) startedAt = new Date(start.getTime() - 86400000).getTime();
+  return (nowMs - startedAt) / 60000;
+}
+
 async function tickKeepAlive() {
   const { pm_config: cfg, pm_log: log = [], pm_stale_notified_at: lastWarn } =
     await chrome.storage.local.get(['pm_config', 'pm_log', 'pm_stale_notified_at']);
 
   if (!cfg || !cfg.enabled) return { skipped: '未启用' };
+
+  // ---- 0) 时段判断：不在工作时段内，停摆属正常，一律不报警 ----
+  const nowMs = Date.now();
+  const inWindow = inWorkWindow(cfg, nowMs);
+  if (!inWindow) {
+    return {
+      skipped: 'outside-window',
+      detail: `当前不在监控时段（${cfg.windowStart}:00-${cfg.windowEnd}:00），停摆属正常`
+    };
+  }
+  // 刚进入时段不久，给页面留出恢复时间，避免"刚上班 1 分钟就报停摆"。
+  // 注意：宽限期只对"进时段后还没跑完一轮"的情况生效；若进时段后完全没成功过、
+  // 且早已超过一轮时间，那是真异常，不能靠宽限期掩盖。
+  const into = minutesIntoWindow(cfg, nowMs);
+  const GRACE_MIN = 15;
+  const inGraceByTime = into < GRACE_MIN;
+  const newestAtStart = (() => {
+    const newest0 = Array.isArray(log) && log.length
+      ? Math.max(...log.map(x => Number(x && x.ts) || 0)) : 0;
+    if (!newest0) return 0;
+    return newest0;
+  })();
+  // 进入本时段之后是否曾有过查询
+  const hadQueryInWindow = (() => {
+    if (!newestAtStart) return false;
+    if (!cfg.timeWindowEnabled) return true;
+    const s = toNum(cfg.windowStart, null);
+    if (s == null) return true;
+    const now = new Date(nowMs);
+    let startTs = new Date(now.getFullYear(), now.getMonth(), now.getDate(), s, 0, 0, 0).getTime();
+    if (startTs > nowMs) startTs -= 86400000;
+    return newestAtStart >= startTs;
+  })();
+  const inGrace = inGraceByTime && hadQueryInWindow;
 
   // ---- 1) 找监控中的标签页 ----
   const tabs = await chrome.tabs.query({});
@@ -92,6 +158,9 @@ async function tickKeepAlive() {
 
   if (!targets.length) {
     const detail = '监控页面已被关闭（找不到匹配的标签页）';
+    // 刚进入时段、且时段内跑过查询时给宽限（刚开机没来得及开页面）；
+    // 若整个时段都没动静且标签页也没了，就是要报警的真异常
+    if (inGrace) return { action: 'no-tab-grace', detail, into: Math.round(into) };
     // 30 分钟内不重复报警
     if (!lastWarn || Date.now() - lastWarn > 30 * 60 * 1000) await notifyStale(detail);
     return { action: 'no-tab', detail };
@@ -116,17 +185,32 @@ async function tickKeepAlive() {
   const ageMin = newest ? (Date.now() - newest) / 60000 : Infinity;
 
   let staleWarned = false;
-  if (ageMin > STALE_MIN) {
+  if (inGrace) {
+    return { checked: targets.length, recovered, ageMin: Math.round(ageMin), staleWarned, graced: true };
+  }
+
+  // 停摆阈值跟随配置：整轮周期 + 词数 × 轮内间隔，再留 1.5 倍余量。
+  // 固定 60 分钟会在"皮肤多、周期长"时误报，在"周期短"时又太迟钝。
+  const staleLimitMin = (() => {
+    const n = Math.max(1, (cfg.keywords || []).length);
+    const period = Math.max(60, toNum(cfg.baseInterval, 1800)) + Math.max(0, toNum(cfg.jitter, 0));
+    const hop = Math.max(15, toNum(cfg.hopMinSec, 20) * 1.5);
+    const oneRound = Math.max(period, (n - 1) * hop);
+    // 至少给 60 分钟，最多 3 小时，避免极端配置导致长期不报警
+    return Math.min(180, Math.max(60, Math.ceil(oneRound / 60 * 2.5)));
+  })();
+
+  if (ageMin > staleLimitMin) {
     if (!lastWarn || Date.now() - lastWarn > 30 * 60 * 1000) {
       await notifyStale(
-        `已经 ${ageMin === Infinity ? '很久' : Math.round(ageMin) + ' 分钟'} 没有新的查询记录`
+        `已超过 ${staleLimitMin} 分钟没有新的查询记录（当前在监控时段内）`
         + (recovered ? `；已自动重载页面 ${recovered} 个` : '')
       );
       staleWarned = true;
     }
   }
 
-  return { checked: targets.length, recovered, ageMin: Math.round(ageMin), staleWarned };
+  return { checked: targets.length, recovered, ageMin: Math.round(ageMin), staleLimitMin, staleWarned };
 }
 
 // ---------- 每日 0:00 汇总（补货 / 卖出） ----------
