@@ -10,10 +10,11 @@
 
   const CFG_KEY = 'pm_config';
   const NOTIFIED_KEY = 'pm_notified';
-  const BEST_KEY = 'pm_best';          // search 模式：每个关键词已提醒过的最低价
+  const BEST_KEY = 'pm_best';          // search 模式：每个关键词已提醒过的最低价（仅日志展示，不再作为推送闸门）
   const TRACK_KEY = 'pm_track';        // 每个关键词上次看到的最低价，用于判断补货/卖出
   const DAILY_KEY = 'pm_daily';        // 今日事件流水（补货/卖出），供 0:00 汇总
-  const MAX_NOTIFIED = 300;            // 去重表最多保留条数，防止无限增长
+  const MAX_NOTIFIED = 1000;           // 去重表最多保留条数（按商品粒度记录，条数比旧版多），防止无限增长
+  const PRICE_BUCKET = 10;             // 搜索去重的价格档：同一商品价格 ±5 元内视为“同一价格附近”
   // 轮内相邻关键词之间的随机间隔（毫秒）：20~45 秒。
   // 依据公开实测：同一 IP 若平均快于约每 3 秒一次、连续几十次，会触发滑块验证。
   // 这里远低于该阈值，节奏接近“人一个个点开看”。
@@ -445,6 +446,20 @@
     return parseNum(el.textContent);
   }
 
+  // 搜索结果里的“商品身份”：链接优先（同一商品刷新/换页都不变）；
+  // 链接拿不到时退化为「标题 + 卡片文本」，并剔除价格文本，避免价格变化改变身份。
+  function cardIdentity(card) {
+    const link = extractLink(card);
+    if (link) return 'link:' + link;
+    const titleEl = qs(card, cfg.titleSelector || '.main-title');
+    const title = norm(titleEl ? titleEl.textContent : '');
+    let text = norm(card.textContent);
+    const priceEl = qs(card, cfg.searchPriceSelector || '.row-hd .price') || qs(card, '.price');
+    const priceTxt = priceEl ? norm(priceEl.textContent) : '';
+    if (priceTxt) text = norm(text.split(priceTxt).join(' '));
+    return 'text:' + norm(title + '|' + text).slice(0, 200);
+  }
+
   // 读取整页卡片的最低报价。
   // 默认第一个即最低（order_by=price ASC），但如果某张卡读不到价、或排序参数被改动，
   // 就退化成“取所有卡片里的最小值”，避免把非最低价当成最低价造成误判。
@@ -726,46 +741,67 @@
             }
           }
 
-          // ② 判断「是否低于目标价」（创新低才推）
-          //    这是唯一会实时推送的场景：只有出现比目标价更低的价格才打扰你。
+          // ② 判断「是否低于目标价」：按「商品身份 + 价格档」去重后推送
+          //    旧版用 pm_best（该词历史最低价）当闸门：另一个商品同样 ¥300 会被判成“非新低”而漏报。
+          //    现在改为逐商品判断：商品 ≤ 目标价、且该商品在该价格档没提醒过就提醒；
+          //    同一商品同价附近仍只提醒一次，原有防刷屏能力保留。
           const reached = target != null && price <= target;
           const prevBest = toNum(best['kw:' + shownName], null);
-          const isNewLow = reached && (prevBest == null || price < prevBest);
+          const hits = [];
+          const keys = [];
+          const seenKeys = new Set();
+          let skipped = 0;                 // 命中过、但同一商品同一价格档已提醒过的数量
+          let eventAttached = false;
+          if (reached) {
+            for (const it of items) {
+              const p = readCardPrice(it);
+              if (p == null || p > target) continue;
+              // 新键带 item: 前缀，与旧版 search|关键词|价格 的键天然不冲突（旧键视作无记录）
+              const key = 'search|item:' + cardIdentity(it)
+                + '|p' + Math.round(p / PRICE_BUCKET);
+              if (notified[key] || seenKeys.has(key)) { skipped++; continue; }
+              seenKeys.add(key);
+              // 补货/卖出事件按全场最低价判定，只挂到对应那条消息上
+              const isEventHit = !eventAttached && !!evt && p === price;
+              if (isEventHit) eventAttached = true;
+              keys.push(key);
+              hits.push({
+                kind: 'search',
+                keyword: shownName,
+                price: p,
+                threshold: target,
+                url: location.href,
+                link: extractLink(it),
+                hasEvent: isEventHit,
+                eventKind: isEventHit ? (evt ? evt.kind : '') : ''
+              });
+            }
+          }
           let pushed = false;
           let pushError = '';
 
-          if (isNewLow) {
-            best['kw:' + shownName] = price;
-            try { await chrome.storage.local.set({ [BEST_KEY]: best }); } catch (e) { /* ignore */ }
-            const res = await commitAndNotify(
-              [{
-                kind: 'search',
-                keyword: shownName,
-                price,
-                threshold: target,
-                url: location.href,
-                link: cardLink,
-                hasEvent: !!evt,
-                eventKind: evt ? evt.kind : ''
-              }],
-              ['search|' + shownName + '|' + price]
-            );
+          if (hits.length) {
+            const res = await commitAndNotify(hits, keys);
             pushed = !(res && res.ok === false);
-            if (!pushed) {
-              pushError = (res && res.error) || '未知错误';
-              // 推送失败则回滚最低价记录，否则该价格会被当成“已提醒过”而永久漏报
-              if (prevBest == null) delete best['kw:' + shownName];
-              else best['kw:' + shownName] = prevBest;
-              try { await chrome.storage.local.set({ [BEST_KEY]: best }); } catch (e) { /* ignore */ }
+            if (!pushed) pushError = (res && res.error) || '未知错误';
+            else {
+              // pm_best 仅作为“该词已提醒过的最低价”记录，用于日志展示，不再参与推送判断
+              const minHit = hits.reduce((m, h) => (m == null || h.price < m ? h.price : m), null);
+              if (minHit != null && (prevBest == null || minHit < prevBest)) {
+                best['kw:' + shownName] = minHit;
+                try { await chrome.storage.local.set({ [BEST_KEY]: best }); } catch (e) { /* ignore */ }
+              }
             }
           }
 
           // ④ 写查询记录（把变动事件合并进同一条）
           let resultText;
           if (!reached) resultText = '未达目标价';
-          else if (pushed) resultText = '命中已提醒';
-          else if (isNewLow) resultText = '命中但推送失败：' + pushError;
-          else resultText = '命中但非新低（之前已提醒过）';
+          else if (pushed) resultText = '命中已提醒'
+            + (hits.length > 1 ? `（${hits.length} 个商品）` : '')
+            + (skipped ? `，${skipped} 个同商品同价已跳过` : '');
+          else if (hits.length) resultText = '命中但推送失败：' + pushError;
+          else resultText = '命中但已提醒过（同一商品同价）';
           if (evt) {
             resultText = (evt.kind === 'restock' ? '🆕 补货' : '📤 卖出')
               + '（' + evt.prevPrice + '→' + price + '，' + (evt.delta > 0 ? '+' : '') + evt.delta + '）'
