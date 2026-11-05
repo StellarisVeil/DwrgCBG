@@ -265,6 +265,7 @@ async function save() {
     : prev.runToken;
 
   await chrome.storage.local.set({ pm_config: cfg });
+  kwSavedSig = JSON.stringify(keywords);   // 整份保存后同步，避免即时保存重复写同一份关键词
 
   // 保存即启用：已打开的藏宝阁页可能还没注入脚本（onChanged 监听不到），
   // 这里主动把它导航到第一个关键词，保证“勾选启用 + 保存”后马上开始搜索。
@@ -309,6 +310,64 @@ async function save() {
   setStatus(msg, true);
 }
 
+// ---------- 关键词即时生效 ----------
+// 只写 pm_config.keywords 一个字段（与已存配置合并），不动 webhook / 皮肤清单 / 去重表。
+// 停止输入 KW_DEBOUNCE_MS 后自动落盘；失焦立即落盘，不等防抖。
+const KW_DEBOUNCE_MS = 800;
+let kwTimer = null;
+let kwSavedSig = null;    // 上次落盘的 keywords 序列化值，避免无变化时重复写
+let kwSaving = null;      // 串行化写入，避免防抖与失焦两次落盘交叉
+
+function collectKeywords() {
+  const parsed = parsePairs($('keywords').value);
+  return {
+    keywords: parsed.pairs.map(p => (p.value == null ? { name: p.name } : { name: p.name, target: p.value })),
+    bad: parsed.bad,
+    hasInput: String($('keywords').value || '').split(/\r?\n/).some(l => l.trim())
+  };
+}
+
+async function persistKeywords() {
+  if (kwSaving) return kwSaving;
+  kwSaving = (async () => {
+    if ($('mode').value !== 'search') return;
+    const { keywords, bad, hasInput } = collectKeywords();
+    setInvalid('keywords', bad.length > 0);
+    const { pm_config } = await chrome.storage.local.get('pm_config');
+    // 首次使用还没保存过任何配置：不凭关键词创建半份配置，提示先完成一次初始化
+    if (!pm_config) {
+      setStatus('还没有已保存的配置：请先点一次「保存并应用」完成初始化（之后关键词改动会自动生效）', false);
+      return;
+    }
+    // 有输入但一行都解析不出：不落盘，避免把用户整段输入静默清空
+    if (hasInput && !keywords.length) {
+      const cur = Array.isArray(pm_config.keywords) ? pm_config.keywords.length : 0;
+      setStatus('关键词未写入：' + (bad.join('；') || '没有可用行') + `（仍沿用已生效的 ${cur} 条）`, false);
+      return;
+    }
+    const sig = JSON.stringify(keywords);
+    const badNote = bad.length ? `；已跳过 ${bad.length} 行：` + bad.slice(0, 2).join('；') : '';
+    if (sig === kwSavedSig) {
+      if (bad.length) setStatus('关键词有格式问题未写入：' + bad.slice(0, 2).join('；'), false);
+      return;
+    }
+    await chrome.storage.local.set({ pm_config: { ...pm_config, keywords } });   // 只覆盖 keywords
+    kwSavedSig = sig;
+    if (!keywords.length) {
+      setStatus('关键词已清空并即时生效：搜索已停止（重新填写后会自动恢复）' + badNote, !bad.length);
+    } else {
+      setStatus(`关键词已即时生效（${keywords.length} 条），无需点「保存并应用」` + badNote, !bad.length);
+    }
+  })().catch(e => setStatus('关键词自动保存失败：' + ((e && e.message) || e), false))
+    .finally(() => { kwSaving = null; });
+  return kwSaving;
+}
+
+function scheduleKeywordPersist() {
+  if (kwTimer) clearTimeout(kwTimer);
+  kwTimer = setTimeout(() => { kwTimer = null; persistKeywords(); }, KW_DEBOUNCE_MS);
+}
+
 // ---------- 载入 ----------
 function fillDefaults() {
   $('enabled').checked = false;
@@ -339,7 +398,7 @@ function fillDefaults() {
 async function load() {
   const { pm_config } = await chrome.storage.local.get('pm_config');
   applyModeVisibility();
-  if (!pm_config) { fillDefaults(); applyModeVisibility(); return; }
+  if (!pm_config) { fillDefaults(); applyModeVisibility(); kwSavedSig = JSON.stringify(collectKeywords().keywords); return; }
 
   const c = pm_config;
   $('enabled').checked = !!c.enabled;
@@ -370,10 +429,17 @@ async function load() {
   $('hopMaxSec').value = toNum(c.hopMaxSec, 45);
   $('webhook').value = c.webhook || '';
   applyModeVisibility();
+  kwSavedSig = JSON.stringify(collectKeywords().keywords);
 }
 
 // ---------- 事件 ----------
 $('mode').addEventListener('change', applyModeVisibility);
+// 关键词：停止输入 800ms 后落盘；失焦立即落盘（不必再点「保存并应用」）
+$('keywords').addEventListener('input', scheduleKeywordPersist);
+$('keywords').addEventListener('blur', () => {
+  if (kwTimer) { clearTimeout(kwTimer); kwTimer = null; }
+  persistKeywords();
+});
 $('save').onclick = () => { save().catch(e => setStatus('保存出错：' + ((e && e.message) || e), false)); };
 
 $('clear').onclick = async () => {

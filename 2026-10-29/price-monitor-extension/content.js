@@ -937,6 +937,24 @@
         const next = changes[CFG_KEY].newValue;
         const was = changes[CFG_KEY].oldValue || {};
         if (!next || !next.enabled) { stop(); return; }
+        // 只有关键词变化（配置页输入后即时落盘）：就地更新配置，不整页刷新，
+        // 否则每次防抖落盘都会打断监控标签页。
+        const stripKeywords = (o) => {
+          const c = { ...(o || {}) };
+          delete c.keywords;
+          return JSON.stringify(c);
+        };
+        if (stripKeywords(was) === stripKeywords(next)) {
+          cfg = next;
+          // 之前因关键词清空而停止轮询：重新填词后自动恢复；风控暂停中不自动恢复，需用户处理验证
+          const hasKw = (Array.isArray(next.keywords) ? next.keywords : []).some(k => kwName(k));
+          if (stopped && next.mode === 'search' && hasKw) {
+            chrome.storage.local.get('pm_paused_reason').then(g => {
+              if (!g || !g.pm_paused_reason) { stopped = false; tick(); }
+            }).catch(() => { /* ignore */ });
+          }
+          return;
+        }
         // 从停用切到启用：不必刷整页，直接跳到第一个关键词
         if (!was.enabled && next.enabled && next.mode === 'search') {
           const kws = (Array.isArray(next.keywords) ? next.keywords : []).filter(k => kwName(k));
