@@ -232,10 +232,9 @@ async function scheduleDailySummary() {
 
 // 汇总"昨天"的补货/卖出事件（0:00 触发时，要总结的是刚结束的那一天）
 async function buildDailySummary() {
-  const got = await chrome.storage.local.get([DAILY_KEY, 'pm_config', 'pm_track']);
+  const got = await chrome.storage.local.get([DAILY_KEY, 'pm_config']);
   const cfg = got.pm_config || {};
   const daily = got[DAILY_KEY] || {};
-  const track = got.pm_track || {};
 
   const y = new Date();
   y.setDate(y.getDate() - 1);
@@ -255,28 +254,6 @@ async function buildDailySummary() {
 
   const fmt = (n) => (Math.round(n * 100) / 100);
 
-  // 日报里的「当前最低」= 该关键词最后一次成功扫描读到的最低价（pm_track.last）。
-  // 旧实现误用了 pm_best——那是“历史上成功提醒过的最低价”，与当日实际行情无关，
-  // 跨天、卖出后价格回升、推送失败、清空通知记录时都会显示过期的值。
-  // 若 pm_track 缺失（从未扫描成功），退化为当日最后一条事件的成交价；仍无则省略该字段，绝不抄旧值。
-  function currentLowest(kw, g) {
-    const t = track['kw:' + kw];
-    const last = t ? toNum(t.last, null) : null;
-    if (last != null) {
-      let note = '';
-      const at = t && t.at ? new Date(t.at) : null;
-      if (at && !isNaN(at.getTime()) && at.toLocaleDateString('zh-CN') !== day) {
-        const hh = String(at.getHours()).padStart(2, '0');
-        const mm = String(at.getMinutes()).padStart(2, '0');
-        note = ` · 最近扫描 ${at.toLocaleDateString('zh-CN')} ${hh}:${mm}`;
-      }
-      return { price: last, note };
-    }
-    const evts = [...g.restock, ...g.sold].sort((a, b) => toNum(b.ts, 0) - toNum(a.ts, 0));
-    const p = evts.length ? toNum(evts[0].price, null) : null;
-    return p != null ? { price: p, note: ' · 当日最后变动价' } : null;
-  }
-
   // 标题里带上涉及的皮肤名（最多 3 个），方便一眼知道是哪些皮肤有动静
   const kwNames = [...new Set(events.map(e => e.keyword).filter(Boolean))];
   const nameLabel = kwNames.length
@@ -290,8 +267,7 @@ async function buildDailySummary() {
     lines.push(`**总计**：补货 ${restocks.length} 次，卖出 ${solds.length} 次`, '');
     Object.keys(byKw).forEach(kw => {
       const g = byKw[kw];
-      const cur = currentLowest(kw, g);
-      lines.push(`**${kw}**` + (cur ? `（当前最低 ¥${fmt(cur.price)}${cur.note}）` : ''));
+      lines.push(`**${kw}**`);
       if (g.restock.length) {
         const lowest = Math.min(...g.restock.map(e => e.price));
         lines.push(`- 🆕 补货 ${g.restock.length} 次，最低到 ¥${fmt(lowest)}`);
