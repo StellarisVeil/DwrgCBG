@@ -17,7 +17,7 @@ function coveredByManifest(url) {
 
 // 动态注册：脚本已存在则 update，不存在则 register（两个 API 都是数组入参）
 async function ensureDynamicScript(pattern) {
-  const script = { id: SCRIPT_ID, matches: [pattern], js: ['content.js'], runAt: 'document_idle' };
+  const script = { id: SCRIPT_ID, matches: [pattern], js: ['window-shared.js', 'content.js'], runAt: 'document_idle' };
   let existing = [];
   try { existing = await chrome.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] }); }
   catch (e) { existing = []; }

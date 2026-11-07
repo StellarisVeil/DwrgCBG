@@ -80,36 +80,12 @@ async function notifyStale(detail) {
   await chrome.storage.local.set({ pm_stale_notified_at: Date.now() });
 }
 
-// ---------- 时段判断（与 content.js 的 inWindow 保持一致） ----------
+// ---------- 时段判断：统一使用 window-shared.js 的 PMWindow（与 content.js 同一套实现） ----------
 // 关键：只有在"应该工作"的时段内停摆才算异常。时段外停摆是正常现象，不报警。
+const PMWindow = self.PMWindow || { inWorkWindow: () => true, windowStartMs: () => null };
 function toNum(v, dflt) {
   const n = typeof v === 'number' ? v : parseFloat(v);
   return isFinite(n) ? n : dflt;
-}
-
-// 是否处于监控时段内（支持跨午夜，如 22 → 8）
-function inWorkWindow(cfg, at) {
-  if (!cfg || !cfg.timeWindowEnabled) return true;          // 未启用时段控制 = 全天都在时段内
-  const d = at ? new Date(at) : new Date();
-  const h = d.getHours();
-  const s = toNum(cfg.windowStart, null);
-  const e = toNum(cfg.windowEnd, null);
-  if (s == null || e == null || s === e) return true;        // 配置无效/起止相同 = 视为全天
-  if (s < e) return h >= s && h < e;                         // 普通时段
-  return h >= s || h < e;                                    // 跨午夜
-}
-
-// 距离"进入下一个工作时段"还有多少分钟（用于给刚进入时段留出宽限期）
-function minutesIntoWindow(cfg, nowMs) {
-  if (!cfg || !cfg.timeWindowEnabled) return Infinity;
-  const s = toNum(cfg.windowStart, null);
-  if (s == null) return Infinity;
-  const now = new Date(nowMs);
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), s, 0, 0, 0);
-  // 若当前已过今天的起始时刻，说明是本段内（含跨午夜的"今天起点是昨天"情形）
-  let startedAt = start.getTime();
-  if (startedAt > nowMs) startedAt = new Date(start.getTime() - 86400000).getTime();
-  return (nowMs - startedAt) / 60000;
 }
 
 async function tickKeepAlive() {
@@ -120,7 +96,7 @@ async function tickKeepAlive() {
 
   // ---- 0) 时段判断：不在工作时段内，停摆属正常，一律不报警 ----
   const nowMs = Date.now();
-  const inWindow = inWorkWindow(cfg, nowMs);
+  const inWindow = PMWindow.inWorkWindow(cfg, nowMs);
   if (!inWindow) {
     return {
       skipped: 'outside-window',
@@ -128,29 +104,12 @@ async function tickKeepAlive() {
     };
   }
   // 刚进入时段不久，给页面留出恢复时间，避免"刚上班 1 分钟就报停摆"。
-  // 注意：宽限期只对"进时段后还没跑完一轮"的情况生效；若进时段后完全没成功过、
-  // 且早已超过一轮时间，那是真异常，不能靠宽限期掩盖。
-  const into = minutesIntoWindow(cfg, nowMs);
+  // 宽限只看"进入本时段多久"，不再要求时段内已有查询——否则每天进入时段的头几分钟
+  // 必然因夜间静默而误报一次。
+  const winStart = PMWindow.windowStartMs(cfg, nowMs);
+  const into = winStart == null ? Infinity : (nowMs - winStart) / 60000;
   const GRACE_MIN = 15;
-  const inGraceByTime = into < GRACE_MIN;
-  const newestAtStart = (() => {
-    const newest0 = Array.isArray(log) && log.length
-      ? Math.max(...log.map(x => Number(x && x.ts) || 0)) : 0;
-    if (!newest0) return 0;
-    return newest0;
-  })();
-  // 进入本时段之后是否曾有过查询
-  const hadQueryInWindow = (() => {
-    if (!newestAtStart) return false;
-    if (!cfg.timeWindowEnabled) return true;
-    const s = toNum(cfg.windowStart, null);
-    if (s == null) return true;
-    const now = new Date(nowMs);
-    let startTs = new Date(now.getFullYear(), now.getMonth(), now.getDate(), s, 0, 0, 0).getTime();
-    if (startTs > nowMs) startTs -= 86400000;
-    return newestAtStart >= startTs;
-  })();
-  const inGrace = inGraceByTime && hadQueryInWindow;
+  const inGrace = winStart != null && into >= 0 && into < GRACE_MIN;
 
   // ---- 1) 找监控中的标签页 ----
   const tabs = await chrome.tabs.query({});
@@ -158,8 +117,7 @@ async function tickKeepAlive() {
 
   if (!targets.length) {
     const detail = '监控页面已被关闭（找不到匹配的标签页）';
-    // 刚进入时段、且时段内跑过查询时给宽限（刚开机没来得及开页面）；
-    // 若整个时段都没动静且标签页也没了，就是要报警的真异常
+    // 刚进入时段给宽限（刚开机还没打开页面）；整个时段都没动静且标签页也没了，就是要报警的真异常
     if (inGrace) return { action: 'no-tab-grace', detail, into: Math.round(into) };
     // 30 分钟内不重复报警
     if (!lastWarn || Date.now() - lastWarn > 30 * 60 * 1000) await notifyStale(detail);
@@ -182,7 +140,10 @@ async function tickKeepAlive() {
   const newest = Array.isArray(log) && log.length
     ? Math.max(...log.map(x => Number(x && x.ts) || 0))
     : 0;
-  const ageMin = newest ? (Date.now() - newest) / 60000 : Infinity;
+  // 夜间静默期不计入停摆：观测起点 = max(最后查询时间, 本时段起点)。
+  // 否则进入时段第一秒就会把整夜累积的“无心跳时长”当成停摆立刻补发。
+  const observedFrom = Math.max(newest, winStart || 0);
+  const ageMin = observedFrom ? (nowMs - observedFrom) / 60000 : Infinity;
 
   let staleWarned = false;
   if (inGrace) {

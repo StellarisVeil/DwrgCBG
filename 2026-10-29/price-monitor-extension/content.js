@@ -103,12 +103,7 @@
 
   // ---------- 时段 / 抖动 ----------
   function inWindow() {
-    if (!cfg.timeWindowEnabled) return true;
-    const h = new Date().getHours();
-    const s = toNum(cfg.windowStart, null), e = toNum(cfg.windowEnd, null);
-    if (s == null || e == null || s === e) return true;
-    if (s < e) return h >= s && h < e;
-    return h >= s || h < e;
+    return PMWindow.inWorkWindow(cfg);
   }
   function nextDelay() {
     const base = Math.max(1, toNum(cfg.baseInterval != null ? cfg.baseInterval : cfg.intervalSec, 60));

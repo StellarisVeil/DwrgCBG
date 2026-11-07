@@ -327,7 +327,7 @@ chrome.notifications.onClicked.addListener(async (id) => {
 
 // ---- 后台守护：标签页白屏/被回收/长时间无查询时自动恢复并报警 ----
 try {
-  importScripts('keepalive.js');
+  importScripts('window-shared.js', 'keepalive.js');
 } catch (e) {
   // 加载失败不影响核心推送功能
   try { console.warn('[价格监控] 保活脚本加载失败', e); } catch (err) { /* ignore */ }
