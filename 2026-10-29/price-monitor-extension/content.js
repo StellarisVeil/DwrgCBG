@@ -24,7 +24,8 @@
   const DEFAULT_ITEM_SELECTOR = '.product-item.product-item-cards';
   const DEFAULT_SEARCH_TPL = 'https://id5.cbg.163.com/cgi/mweb/pl?keyword={keyword}&order_by=price%20ASC';
   const LOG_KEY = 'pm_log';             // 查询历史（便于事后纠错）
-  const MAX_LOG = 500;                  // 最多保留条数
+  const LOG_RETAIN_MS = 7 * 24 * 60 * 60 * 1000;   // 查询记录保留 7 天
+  const LOG_MAX_COUNT = 20000;          // 安全上限，防止极端配置撑爆扩展存储配额
 
 
   let cfg = null;
@@ -180,13 +181,16 @@
     logQueue = logQueue.then(async () => {
       try {
         const got = await chrome.storage.local.get(LOG_KEY);
-        const list = Array.isArray(got[LOG_KEY]) ? got[LOG_KEY] : [];
+        const cutoff = Date.now() - LOG_RETAIN_MS;
+        // 至少保留 7 天：只淘汰超过 7 天的旧记录，不再按固定条数截断
+        const list = (Array.isArray(got[LOG_KEY]) ? got[LOG_KEY] : [])
+          .filter(x => x && toNum(x.ts, 0) >= cutoff);
         list.unshift({
           ts: Date.now(),
           time: new Date().toLocaleString('zh-CN'),
           ...entry
         });
-        if (list.length > MAX_LOG) list.length = MAX_LOG;
+        if (list.length > LOG_MAX_COUNT) list.length = LOG_MAX_COUNT;
         await chrome.storage.local.set({ [LOG_KEY]: list });
       } catch (e) { /* 日志失败不影响监控 */ }
     }).catch(() => {});

@@ -476,6 +476,7 @@ $('test').onclick = async () => {
 
 // ---------- 查询记录 ----------
 const LOG_KEY = 'pm_log';
+const LOG_RENDER_LIMIT = 2000;   // 表格最多渲染条数，避免上万条记录卡死配置页；完整记录可导出 CSV
 
 function fmtMoney(v) {
   return (v == null || v === '') ? '—' : ('¥' + v);
@@ -549,6 +550,12 @@ function renderLogs() {
       summary.textContent = `共 ${total} 条记录，命中 ${hitCount} 条；补货 ${restockCount} 次、卖出 ${soldCount} 次。`
         + (onlyHit ? `当前只显示命中（${list.length} 条）。` : '')
         + (onlyEvent ? `当前只显示变动（${list.length} 条）。` : '');
+    }
+
+    // 记录量大时只渲染最近一部分，避免配置页卡死；导出 CSV 不受影响
+    if (list.length > LOG_RENDER_LIMIT) {
+      list = list.slice(0, LOG_RENDER_LIMIT);
+      summary.textContent += `（表格最多显示最近 ${LOG_RENDER_LIMIT} 条，完整记录请导出 CSV）`;
     }
 
     tbody.innerHTML = '';
