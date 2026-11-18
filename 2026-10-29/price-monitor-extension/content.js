@@ -235,6 +235,21 @@
       .slice(MAX_NOTIFIED)
       .forEach(k => { delete notified[k]; });
   }
+  // 从 storage 重新拉取去重表并与内存合并（同一键取提醒时间较新者）。
+  // 此前 pm_notified 只在启动时读一次、提交时整表覆写：
+  // 多标签页/长驻页会用过期副本覆盖别的页刚写入的记录，
+  // 被抹掉的记录下一轮就被当成“从未提醒”，造成同一商品反复推送。
+  async function syncNotified() {
+    try {
+      const got = await chrome.storage.local.get(NOTIFIED_KEY);
+      const disk = got[NOTIFIED_KEY];
+      if (!disk || typeof disk !== 'object') return;
+      for (const k of Object.keys(disk)) {
+        const mem = notified[k];
+        if (!mem || notifiedTime(disk[k]) > notifiedTime(mem)) notified[k] = disk[k];
+      }
+    } catch (e) { /* 读取失败沿用内存副本 */ }
+  }
   // 去重判定：同一商品「未降价只提醒一次」。
   // 返回 true 表示需要提醒；副作用：旧格式记录（只存过时间、无价格）会就地按当前价补记基准。
   function dedupeCheck(key, price) {
@@ -271,6 +286,8 @@
     hits.forEach(h => {
       if (h && h.key != null) priceOf[h.key] = (h.price != null ? h.price : h.sum);
     });
+    // 写入前先合并磁盘上的最新去重表，避免多标签页整表互相覆盖
+    await syncNotified();
     keys.forEach(k => {
       prevVals[k] = notified[k];
       notified[k] = { t: now, price: priceOf[k] };
@@ -379,6 +396,7 @@
     let lowestAcct = null;
 
     const hits = [];
+    await syncNotified();   // 判重前同步最新去重表，防止过期内存副本造成重复提醒
     items.forEach((item) => {
       const pageNames = qsa(item, cfg.skinNameSelector).map(e => norm(e.textContent));
       const titleEl = qs(item, cfg.titleSelector);
@@ -777,6 +795,7 @@
           const hits = [];
           const keys = [];
           const seenKeys = new Set();
+          await syncNotified();   // 判重前同步最新去重表，防止过期内存副本造成重复提醒
           let skipped = 0;                 // 命中过、但同一商品未降价已提醒过的数量
           let eventAttached = false;
           if (reached) {
