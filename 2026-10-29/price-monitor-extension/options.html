@@ -67,6 +67,21 @@
   <div class="hint">例：9 → 23 表示 9 点至 23 点；22 → 8 表示 22 点至次日 8 点。时段外不刷新、不扫描，只静默等待。</div>
 </div>
 
+<div class="row"><label>周几筛选（仅勾选的日子扫描/提醒，未勾选的日子静默等待）</label><input type="checkbox" id="dayFilterEnabled"></div>
+<div class="row">
+  <label>勾选要扫描的日子（周一 ~ 周日）</label>
+  <div style="display:flex; gap:14px; flex-wrap:wrap;" id="dayChecks">
+    <label style="display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:400;font-size:13px;"><input type="checkbox" class="active-day" value="1">周一</label>
+    <label style="display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:400;font-size:13px;"><input type="checkbox" class="active-day" value="2">周二</label>
+    <label style="display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:400;font-size:13px;"><input type="checkbox" class="active-day" value="3">周三</label>
+    <label style="display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:400;font-size:13px;"><input type="checkbox" class="active-day" value="4">周四</label>
+    <label style="display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:400;font-size:13px;"><input type="checkbox" class="active-day" value="5">周五</label>
+    <label style="display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:400;font-size:13px;"><input type="checkbox" class="active-day" value="6">周六</label>
+    <label style="display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:400;font-size:13px;"><input type="checkbox" class="active-day" value="0">周日</label>
+  </div>
+  <div class="hint">与「时段控制」相互独立：只勾日子不勾「周几筛选」时，每天照常扫描；两个都勾则同时满足（日子对且在时段内）才扫描。一个日子都没勾 → 全周不扫描。</div>
+</div>
+
 <div class="row">
   <label>商品卡片选择器（匹配列表里的每一个账号卡，两种模式共用）</label>
   <input id="itemSelector" placeholder=".product-item.product-item-cards">

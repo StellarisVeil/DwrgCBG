@@ -6,8 +6,19 @@
     return isFinite(n) ? n : dflt;
   }
 
+  // 周几筛选：仅勾选的日子扫描。activeDays 为勾选的周几数组（与 Date.getDay 一致：
+  // 0=周日, 1=周一 … 6=周六）。未启用时不限制；启用后未勾选的日子一律不扫描。
+  function inActiveDay(cfg, at) {
+    if (!cfg || !cfg.dayFilterEnabled) return true;
+    const days = Array.isArray(cfg.activeDays) ? cfg.activeDays : [];
+    if (!days.length) return false;         // 启用了筛选但一个都没勾 → 全周不扫描
+    const d = at == null ? new Date() : new Date(at);
+    return days.indexOf(d.getDay()) !== -1;
+  }
+
   // 是否处于监控时段内
   function inWorkWindow(cfg, at) {
+    if (!inActiveDay(cfg, at)) return false;  // 未勾选的日子：不扫描、不报警
     if (!cfg || !cfg.timeWindowEnabled) return true;
     const d = at == null ? new Date() : new Date(at);
     const h = d.getHours();
@@ -32,5 +43,5 @@
     return start;
   }
 
-  root.PMWindow = { inWorkWindow: inWorkWindow, windowStartMs: windowStartMs };
+  root.PMWindow = { inWorkWindow: inWorkWindow, windowStartMs: windowStartMs, inActiveDay: inActiveDay };
 })(typeof self !== 'undefined' ? self : this);

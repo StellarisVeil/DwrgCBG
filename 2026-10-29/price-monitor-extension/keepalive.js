@@ -96,6 +96,10 @@ async function tickKeepAlive() {
 
   // ---- 0) 时段判断：不在工作时段内，停摆属正常，一律不报警 ----
   const nowMs = Date.now();
+  // 周几筛选：未勾选的日子静默等待，停摆属正常，不报警
+  if (PMWindow.inActiveDay && !PMWindow.inActiveDay(cfg, nowMs)) {
+    return { skipped: 'off-day', detail: '今天不在勾选的扫描日内（周几筛选），停摆属正常' };
+  }
   const inWindow = PMWindow.inWorkWindow(cfg, nowMs);
   if (!inWindow) {
     return {

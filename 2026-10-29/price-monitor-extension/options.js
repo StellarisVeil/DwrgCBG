@@ -155,6 +155,13 @@ async function save() {
     }
   }
 
+  // 周几筛选：收集勾选的日子（value 与 Date.getDay 一致：0=周日, 1=周一 … 6=周六）
+  const dayEnabled = $('dayFilterEnabled').checked;
+  const activeDays = [...document.querySelectorAll('.active-day')]
+    .filter(c => c.checked)
+    .map(c => toNum(c.value, -1))
+    .filter(v => v >= 0 && v <= 6);
+
   if (!pattern) {
     setInvalid('pattern', true); missing.push('监控页面地址');
   } else if (!/^(\*|[a-z][a-z0-9+.-]*):\/\//i.test(pattern)) {
@@ -217,6 +224,8 @@ async function save() {
     timeWindowEnabled: twEnabled,
     windowStart: Math.round(windowStart),
     windowEnd: Math.round(windowEnd),
+    dayFilterEnabled: dayEnabled,
+    activeDays,
     itemSelector: $('itemSelector').value.trim() || DEFAULT_ITEM_SELECTOR,
     linkSelector: $('linkSelector').value.trim(),
     webhook,
@@ -300,6 +309,7 @@ async function save() {
   let msg = `已保存（${enabled ? '已启用监控' : '未启用监控'}，${modeName}）`;
   if (enabled) {
     if (twEnabled) msg += `；时段 ${cfg.windowStart}-${cfg.windowEnd} 点`;
+    if (dayEnabled) msg += `；仅周 ${activeDays.slice().sort().map(d => '日一二三四五六'[d]).join('/')} 扫描`;
     msg += `；每轮 ${cfg.baseInterval}+${cfg.jitter}s 随机`;
     if (mode === 'search') msg += `，轮内每个词间隔 ${cfg.hopMinSec}~${cfg.hopMaxSec}s`;
   }
@@ -379,6 +389,8 @@ function fillDefaults() {
   $('timeWindowEnabled').checked = false;
   $('windowStart').value = 9;
   $('windowEnd').value = 23;
+  $('dayFilterEnabled').checked = false;
+  document.querySelectorAll('.active-day').forEach(c => { c.checked = true; });
   $('itemSelector').value = DEFAULT_ITEM_SELECTOR;
   $('linkSelector').value = '';
   $('skinNameSelector').value = '.card-item .name-wrap .name';
@@ -410,6 +422,14 @@ async function load() {
   $('timeWindowEnabled').checked = !!c.timeWindowEnabled;
   $('windowStart').value = toNum(c.windowStart, 9);
   $('windowEnd').value = toNum(c.windowEnd, 23);
+  $('dayFilterEnabled').checked = !!c.dayFilterEnabled;
+  {
+    // 已存过 activeDays 就按存的勾；否则默认全勾（= 不筛选时行为不变）
+    const saved = Array.isArray(c.activeDays) ? c.activeDays.map(v => toNum(v, -1)).filter(v => v >= 0 && v <= 6) : null;
+    document.querySelectorAll('.active-day').forEach(cb => {
+      cb.checked = saved ? saved.includes(toNum(cb.value, -1)) : true;
+    });
+  }
   $('itemSelector').value = c.itemSelector || DEFAULT_ITEM_SELECTOR;
   $('linkSelector').value = c.linkSelector || '';
   $('skinNameSelector').value = c.skinNameSelector || '.card-item .name-wrap .name';
