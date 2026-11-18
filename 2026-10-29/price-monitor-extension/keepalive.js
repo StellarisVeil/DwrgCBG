@@ -2,7 +2,9 @@
 // 背景：藏宝阁页面是 Vue 客户端渲染，Chrome 的 Memory Saver 会把长时间在后台的标签页
 // 冻结甚至丢弃（用户早上看到白页），监控随之中断。这里用 chrome.alarms 做兜底：
 //   1) 定期检查标签页是否还活着、页面是否白屏，必要时重新加载并注入脚本；
+//      —— 时段外/非扫描日同样保活，保证进入监控时段时页面是活的；
 //   2) 定期检查「最近一次成功查询」距今多久，超时就推送企微报警，让问题暴露而不是静默。
+//      —— 报警只在监控时段内进行，时段外/非扫描日静默不报警。
 
 const ALARM_NAME = 'pm-keepalive';
 const ALARM_PERIOD_MIN = 5;      // 每 5 分钟巡检一次
@@ -94,41 +96,18 @@ async function tickKeepAlive() {
 
   if (!cfg || !cfg.enabled) return { skipped: '未启用' };
 
-  // ---- 0) 时段判断：不在工作时段内，停摆属正常，一律不报警 ----
+  // ---- 0) 时段判断：只决定“要不要报警”，不影响保活 ----
   const nowMs = Date.now();
   // 周几筛选：未勾选的日子静默等待，停摆属正常，不报警
-  if (PMWindow.inActiveDay && !PMWindow.inActiveDay(cfg, nowMs)) {
-    return { skipped: 'off-day', detail: '今天不在勾选的扫描日内（周几筛选），停摆属正常' };
-  }
+  const offDay = PMWindow.inActiveDay ? !PMWindow.inActiveDay(cfg, nowMs) : false;
   const inWindow = PMWindow.inWorkWindow(cfg, nowMs);
-  if (!inWindow) {
-    return {
-      skipped: 'outside-window',
-      detail: `当前不在监控时段（${cfg.windowStart}:00-${cfg.windowEnd}:00），停摆属正常`
-    };
-  }
-  // 刚进入时段不久，给页面留出恢复时间，避免"刚上班 1 分钟就报停摆"。
-  // 宽限只看"进入本时段多久"，不再要求时段内已有查询——否则每天进入时段的头几分钟
-  // 必然因夜间静默而误报一次。
-  const winStart = PMWindow.windowStartMs(cfg, nowMs);
-  const into = winStart == null ? Infinity : (nowMs - winStart) / 60000;
-  const GRACE_MIN = 15;
-  const inGrace = winStart != null && into >= 0 && into < GRACE_MIN;
 
   // ---- 1) 找监控中的标签页 ----
   const tabs = await chrome.tabs.query({});
   const targets = (tabs || []).filter(t => t && t.url && matchPattern(cfg.pattern, t.url));
 
-  if (!targets.length) {
-    const detail = '监控页面已被关闭（找不到匹配的标签页）';
-    // 刚进入时段给宽限（刚开机还没打开页面）；整个时段都没动静且标签页也没了，就是要报警的真异常
-    if (inGrace) return { action: 'no-tab-grace', detail, into: Math.round(into) };
-    // 30 分钟内不重复报警
-    if (!lastWarn || Date.now() - lastWarn > 30 * 60 * 1000) await notifyStale(detail);
-    return { action: 'no-tab', detail };
-  }
-
   // ---- 2) 检查页面是否白屏，必要时重新加载 ----
+  // 时段外同样执行：夜间页面被冻结/回收成白屏后不恢复，进入时段监控就是死的。
   let recovered = 0;
   for (const t of targets) {
     const st = await pageLooksBroken(t.id);
@@ -138,6 +117,33 @@ async function tickKeepAlive() {
         recovered++;
       } catch (e) { /* ignore */ }
     }
+  }
+
+  // ---- 2.5) 时段外：只保活不报警（停摆属正常现象） ----
+  if (offDay) {
+    return { checked: targets.length, recovered, skipped: 'off-day-keepalive',
+      detail: '今天不在勾选的扫描日内（周几筛选），仅保活不报警' };
+  }
+  if (!inWindow) {
+    return { checked: targets.length, recovered, skipped: 'outside-window-keepalive',
+      detail: `当前不在监控时段（${cfg.windowStart}:00-${cfg.windowEnd}:00），仅保活不报警` };
+  }
+
+  // 刚进入时段不久，给页面留出恢复时间，避免"刚上班 1 分钟就报停摆"。
+  // 宽限只看"进入本时段多久"，不再要求时段内已有查询——否则每天进入时段的头几分钟
+  // 必然因夜间静默而误报一次。
+  const winStart = PMWindow.windowStartMs(cfg, nowMs);
+  const into = winStart == null ? Infinity : (nowMs - winStart) / 60000;
+  const GRACE_MIN = 15;
+  const inGrace = winStart != null && into >= 0 && into < GRACE_MIN;
+
+  if (!targets.length) {
+    const detail = '监控页面已被关闭（找不到匹配的标签页）';
+    // 刚进入时段给宽限（刚开机还没打开页面）；整个时段都没动静且标签页也没了，就是要报警的真异常
+    if (inGrace) return { action: 'no-tab-grace', detail, into: Math.round(into) };
+    // 30 分钟内不重复报警
+    if (!lastWarn || Date.now() - lastWarn > 30 * 60 * 1000) await notifyStale(detail);
+    return { action: 'no-tab', detail };
   }
 
   // ---- 3) 检查是否长时间没有新日志 ----
