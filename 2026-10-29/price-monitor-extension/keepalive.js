@@ -54,6 +54,12 @@ async function pageLooksBroken(tabId) {
 
 async function notifyStale(detail) {
   const { pm_config = {} } = await chrome.storage.local.get('pm_config');
+  // 停摆消息总开关：未勾选「停摆消息发送」时一律不发（企微与本地弹窗都不发）。
+  // 返回 false 表示本次没有真正发出消息，供调用方的 staleWarned 日志如实记录。
+  if (!pm_config.stallAlertEnabled) {
+    console.info('[价格监控] 检测到停摆但「停摆消息发送」未勾选，静默跳过：' + detail);
+    return false;
+  }
   const webhook = (pm_config.webhook || '').trim();
   const msg = [
     '### ⚠️ 价格监控已停摆',
@@ -80,6 +86,7 @@ async function notifyStale(detail) {
     });
   } catch (e) { /* ignore */ }
   await chrome.storage.local.set({ pm_stale_notified_at: Date.now() });
+  return true;
 }
 
 // ---------- 时段判断：统一使用 window-shared.js 的 PMWindow（与 content.js 同一套实现） ----------
@@ -175,11 +182,10 @@ async function tickKeepAlive() {
 
   if (ageMin > staleLimitMin) {
     if (!lastWarn || Date.now() - lastWarn > 30 * 60 * 1000) {
-      await notifyStale(
+      staleWarned = await notifyStale(
         `已超过 ${staleLimitMin} 分钟没有新的查询记录（当前在监控时段内）`
         + (recovered ? `；已自动重载页面 ${recovered} 个` : '')
       );
-      staleWarned = true;
     }
   }
 

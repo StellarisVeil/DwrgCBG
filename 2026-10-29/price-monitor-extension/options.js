@@ -226,6 +226,7 @@ async function save() {
     windowEnd: Math.round(windowEnd),
     dayFilterEnabled: dayEnabled,
     activeDays,
+    stallAlertEnabled: $('stallAlertEnabled').checked,
     itemSelector: $('itemSelector').value.trim() || DEFAULT_ITEM_SELECTOR,
     linkSelector: $('linkSelector').value.trim(),
     webhook,
@@ -391,6 +392,7 @@ function fillDefaults() {
   $('windowEnd').value = 23;
   $('dayFilterEnabled').checked = false;
   document.querySelectorAll('.active-day').forEach(c => { c.checked = true; });
+  $('stallAlertEnabled').checked = false;
   $('itemSelector').value = DEFAULT_ITEM_SELECTOR;
   $('linkSelector').value = '';
   $('skinNameSelector').value = '.card-item .name-wrap .name';
@@ -430,6 +432,7 @@ async function load() {
       cb.checked = saved ? saved.includes(toNum(cb.value, -1)) : true;
     });
   }
+  $('stallAlertEnabled').checked = !!c.stallAlertEnabled;
   $('itemSelector').value = c.itemSelector || DEFAULT_ITEM_SELECTOR;
   $('linkSelector').value = c.linkSelector || '';
   $('skinNameSelector').value = c.skinNameSelector || '.card-item .name-wrap .name';
