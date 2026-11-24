@@ -129,13 +129,15 @@ async function tickKeepAlive() {
       detail: `当前不在监控时段（${cfg.windowStart}:00-${cfg.windowEnd}:00），仅保活不报警` };
   }
 
-  // 刚进入时段不久，给页面留出恢复时间，避免"刚上班 1 分钟就报停摆"。
-  // 宽限只看"进入本时段多久"，不再要求时段内已有查询——否则每天进入时段的头几分钟
-  // 必然因夜间静默而误报一次。
-  const winStart = PMWindow.windowStartMs(cfg, nowMs);
-  const into = winStart == null ? Infinity : (nowMs - winStart) / 60000;
+  // 刚进入“本段监控”不久，给页面留出恢复时间，避免"刚上班 1 分钟就报停摆"。
+  // 起点取“连续监控段”的起点（含周几筛选）：不监测日结束后的 0:00 也重新计时，
+  // 否则不监测日的静默会被累计成停摆。
+  const runStart = PMWindow.activeRunStartMs
+    ? PMWindow.activeRunStartMs(cfg, nowMs)
+    : PMWindow.windowStartMs(cfg, nowMs);
+  const into = runStart == null ? Infinity : (nowMs - runStart) / 60000;
   const GRACE_MIN = 15;
-  const inGrace = winStart != null && into >= 0 && into < GRACE_MIN;
+  const inGrace = runStart != null && into >= 0 && into < GRACE_MIN;
 
   if (!targets.length) {
     const detail = '监控页面已被关闭（找不到匹配的标签页）';
@@ -150,9 +152,9 @@ async function tickKeepAlive() {
   const newest = Array.isArray(log) && log.length
     ? Math.max(...log.map(x => Number(x && x.ts) || 0))
     : 0;
-  // 夜间静默期不计入停摆：观测起点 = max(最后查询时间, 本时段起点)。
-  // 否则进入时段第一秒就会把整夜累积的“无心跳时长”当成停摆立刻补发。
-  const observedFrom = Math.max(newest, winStart || 0);
+  // 不监测日/时段外的静默不计入停摆：观测起点 = max(最后查询时间, 本段监控起点)。
+  // 否则不监测日结束后的第一秒就会把整段静默当成停摆立刻补发。
+  const observedFrom = Math.max(newest, runStart || 0);
   const ageMin = observedFrom ? (nowMs - observedFrom) / 60000 : Infinity;
 
   let staleWarned = false;

@@ -43,5 +43,39 @@
     return start;
   }
 
-  root.PMWindow = { inWorkWindow: inWorkWindow, windowStartMs: windowStartMs, inActiveDay: inActiveDay };
+  // 当前“连续监控段”的起点（毫秒），同时考虑周几筛选与时段控制。
+  // 用于停摆判定：不监测日/时段外的静默不应计入“多久没新查询”。
+  //   - 返回 null：监控一直连续（如全天每天都监测），没有自然起点，按最后一次查询算；
+  //   - 返回毫秒：从这一刻起才进入本段监控（例如不监测日结束后的 0:00、
+  //     或跨午夜时段起点落在不监测日时收敛到的 0:00）。
+  function activeRunStartMs(cfg, nowMs) {
+    if (!cfg) return null;
+    const now = nowMs == null ? Date.now() : nowMs;
+    const dayStart = (ms) => {
+      const d = new Date(ms);
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    };
+
+    const ws = windowStartMs(cfg, now);   // 时段模式下的本段起点；全天/无效时段为 null
+    if (ws != null) {
+      if (!cfg.dayFilterEnabled) return ws;
+      // 跨午夜时 ws 可能落在昨天（不监测日）：本段实际从今天 0:00 才开始
+      return inActiveDay(cfg, ws) ? ws : dayStart(now);
+    }
+
+    // 全天模式（未启用时段 / 起止相同）
+    if (!cfg.dayFilterEnabled) return null;
+    if (!inActiveDay(cfg, now)) return dayStart(now);
+    const y = new Date(now);
+    y.setDate(y.getDate() - 1);
+    // 昨天也是监测日 → 全天连续，无自然起点；否则从今天 0:00 起算
+    return inActiveDay(cfg, y.getTime()) ? null : dayStart(now);
+  }
+
+  root.PMWindow = {
+    inWorkWindow: inWorkWindow,
+    windowStartMs: windowStartMs,
+    inActiveDay: inActiveDay,
+    activeRunStartMs: activeRunStartMs
+  };
 })(typeof self !== 'undefined' ? self : this);
